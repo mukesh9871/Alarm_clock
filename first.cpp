@@ -3,6 +3,7 @@
 //For sleep() function
 #include <windows.h>
 #include<conio.h>
+#include<mmsystem.h>
 //multi-threading liabrary 
 #include<pthread.h>
 
@@ -30,10 +31,10 @@ void *printTime(void *arg)
 		clear_line(25);
 		if(alarm_index!=0){
 			if(alarm_hour == ltm->tm_hour && alarm_min == ltm->tm_min){
-				cout<<"BOOOOOOOOOOOOOM Wake up"<<endl;
+				PlaySound("music1.wav",NULL,SND_FILENAME);
 				cout<<"						"<<ltm->tm_hour<<":"<<ltm->tm_min<<":"<<ltm->tm_sec<<endl;
 				alarm_index=0;
-				exit(0);
+				//exit(0);
 			}
 			else
 				cout<<"						"<<ltm->tm_hour<<":"<<ltm->tm_min<<":"<<ltm->tm_sec<<endl;
@@ -41,7 +42,7 @@ void *printTime(void *arg)
 		else
 			cout<<"						"<<ltm->tm_hour<<":"<<ltm->tm_min<<":"<<ltm->tm_sec<<endl;
 		clear_line(25);
-		sleep(50);
+		sleep(1000);
 	}while(1);
 }
 void *cargRet(void *arg)
