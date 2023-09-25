@@ -1,5 +1,6 @@
 #include<iostream>
 #include<ctime>
+#include<thread>
 //For sleep() function
 #include <windows.h>
 #include<conio.h>
@@ -28,7 +29,7 @@ void *printTime(void *arg)
 	do{
 		time_t tm =time(0);
 		ltm = localtime(&tm);
-		clear_line(25);
+		//clear_line(25);
 		if(alarm_index!=0){
 			if(alarm_hour == ltm->tm_hour && alarm_min == ltm->tm_min){
 				PlaySound("music1.wav",NULL,SND_FILENAME);
@@ -41,7 +42,7 @@ void *printTime(void *arg)
 		}
 		else
 			cout<<"						"<<ltm->tm_hour<<":"<<ltm->tm_min<<":"<<ltm->tm_sec<<endl;
-		clear_line(25);
+		//clear_line(25);
 		sleep(1000);
 	}while(1);
 }
@@ -49,7 +50,9 @@ void *cargRet(void *arg)
 {
 	if(cin.get())
 		exit(0);
+	return NULL;
 }
+
 int main()
 {
 	pthread_t t1;
@@ -69,11 +72,11 @@ int main()
 			alarm_index=1;
 		}
 	}
-	pthread_create(&t1,0,&printTime,NULL);
-	pthread_create(&t2,0,&cargRet,NULL);
+	pthread_create(&t1, 0, &printTime, NULL);
+	pthread_create(&t2, 0, &cargRet, NULL);
 
-	pthread_join(t1,0);
-	pthread_join(t2,0);
+	pthread_join(t1, 0);
+	pthread_join(t2, 0);
 	
 	return 0;
 }
