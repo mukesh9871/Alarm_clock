@@ -1,7 +1,27 @@
 # Alarm Clock
 
-A reliable, cross-platform console alarm clock written in modern C++20.
+A reliable, cross-platform terminal alarm clock written in modern C++20.
 
+```
+╭──────────────────────────────────────────────────────────────────────────╮
+│             ██████ ██████    ██████ ██████    ██████ ██████              │
+│             ██  ██ ██     ██ ██  ██ ██  ██ ██ ██  ██ ██  ██              │
+│             ██  ██ ██████    ██  ██ ██  ██    ██  ██ ██  ██              │
+│             ██  ██ ██  ██ ██ ██  ██ ██  ██ ██ ██  ██ ██  ██              │
+│             ██████ ██████    ██████ ██████    ██████ ██████              │
+│                             Sat 10 Jan 2026                              │
+│                      Next: 06:45 "Gym" in 2d 0h 45m                      │
+├──────────────────────────────────────────────────────────────────────────┤
+│ [on]  06:45     Weekdays              Gym                  in 2d 0h 45m  │
+│ [off] 09:30     Once                  Brunch                             │
+├──────────────────────────────────────────────────────────────────────────┤
+│ a  add   e  edit   space  on/off   d  delete   t  12/24h   q  quit       │
+╰──────────────────────────────────────────────────────────────────────────╯
+```
+
+- **Full-screen terminal UI** ([FTXUI](https://github.com/ArthurSonzogni/FTXUI)): big clock, alarm list,
+  add/edit dialog, flashing ringing screen
+- **Wakes the PC from sleep** for alarms (Windows) and keeps it awake while ringing
 - **Multiple alarms** with labels, repeat days (weekdays, weekends, `mon,wed,fri`...) or one-shot
 - **Snooze** (per-alarm length) and auto-snooze if nobody answers, giving up after 3 tries
 - **Gentle wake-up**: the sound fades in; per-alarm custom WAV/MP3/FLAC
@@ -16,7 +36,7 @@ A reliable, cross-platform console alarm clock written in modern C++20.
 ## Build
 
 Requirements: a C++20 compiler (GCC 11+, Clang 14+, MSVC 2022), CMake 3.24+ and Ninja.
-Dependencies (miniaudio, nlohmann/json, Catch2) are downloaded automatically and verified by SHA-256.
+Dependencies (miniaudio, nlohmann/json, FTXUI, Catch2) are downloaded automatically and verified by SHA-256.
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -33,13 +53,36 @@ alarm_clock list                                     # see them
 alarm_clock edit 2 --time 10:00                      # change one
 alarm_clock disable 2 / enable 2 / remove 2
 alarm_clock set hour-format 12
-alarm_clock                                          # run the clock
+alarm_clock                                          # open the clock
+alarm_clock run --plain                              # simple line output (also used when piped)
 ```
 
-While the clock runs: **Enter** stops a ringing alarm, **s** snoozes, **l** lists alarms, **q** quits.
-Run `alarm_clock help` for all options.
+In the clock window:
 
-Alarms are stored in `%APPDATA%\AlarmClocklarms.json` (Windows),
+| Key | Action |
+|---|---|
+| `a` / `e` or Enter | add / edit alarm (Enter in the form saves, Esc cancels) |
+| `↑` `↓` | select alarm |
+| Space | turn selected alarm on/off |
+| `d` | delete (asks to confirm) |
+| `t` | switch 12/24-hour |
+| `q` | quit |
+| **While ringing:** `s` | snooze |
+| **While ringing:** Enter / Space | stop |
+
+Other keys are ignored while an alarm rings, so you can't quit by accident. Run `alarm_clock help`
+for all command-line options.
+
+### Waking from sleep (Windows)
+
+While the clock is open, it asks Windows to wake the computer one minute before the next alarm,
+and keeps it awake while an alarm rings. For this to work, **Allow wake timers** must be enabled in
+*Control Panel → Power Options → Change plan settings → Advanced → Sleep*. The app warns you if
+Windows refuses. It cannot wake a computer that is shut down or hibernating without wake support,
+and on Linux/macOS waking from sleep is not supported (it needs root), but missed alarms are still
+reported when the computer resumes.
+
+Alarms are stored in `%APPDATA%\AlarmClock\alarms.json` (Windows),
 `~/Library/Application Support/AlarmClock/alarms.json` (macOS) or
 `~/.config/alarm-clock/alarms.json` (Linux). Use `--data FILE` to pick another file.
 If the file is ever corrupted it is set aside as `alarms.json.corrupt-N`, never overwritten.
@@ -49,8 +92,8 @@ If the file is ever corrupted it is set aside as `alarms.json.corrupt-N`, never 
 | Path | Contents |
 |---|---|
 | `src/core/` | Pure logic: scheduling, time zones, parsing/formatting. No I/O; fully unit-tested. |
-| `src/platform/` | OS-specific bits: audio playback, file locations, alarm file storage. |
-| `src/app/` | CLI parsing, commands, the session that runs alarms, and the console UI. |
+| `src/platform/` | OS-specific bits: audio playback, file locations, alarm file storage, wake timers. |
+| `src/app/` | CLI parsing, commands, the session that runs alarms, the terminal UI and plain console UI. |
 | `tests/` | Catch2 unit tests, including a fake DST time zone for edge cases. |
 | `assets/sounds/` | Bundled alarm sound, copied next to the executable at build time. |
 

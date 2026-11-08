@@ -150,3 +150,64 @@ TEST_CASE("Session hour-format setting persists") {
     const int id = f.session.save_alarm(Alarm{.time = {19, 5}});
     CHECK(f.session.describe(id) == "7:05 PM");
 }
+
+namespace {
+class FakePower final : public PowerManager {
+public:
+    bool schedule_wake(std::optional<TimePoint> when) override {
+        wake = when;
+        return accept;
+    }
+    void keep_awake(bool on) override { awake = on; }
+    bool wake_supported() const override { return true; }
+
+    std::optional<TimePoint> wake;
+    bool awake = false;
+    bool accept = true;
+};
+
+struct PowerFixture {
+    TempDir dir;
+    StateFile file{dir.path() / "alarms.json"};
+    FakeClock clock{utc(2026, 1, 10, 6, 0)};
+    TestZone tz{minutes{0}};
+    FakeAudio audio;
+    FakePower power;
+    AlarmSession session{file, clock, tz, audio, [](const std::string&) { return std::filesystem::path("x.wav"); },
+                         &power};
+};
+}  // namespace
+
+TEST_CASE("Session wakes the computer before the next alarm and keeps it awake while ringing") {
+    PowerFixture f;
+    f.session.start();
+    CHECK_FALSE(f.power.wake.has_value());
+
+    f.session.save_alarm(Alarm{.time = {7, 0}, .snooze_minutes = 5});
+    CHECK(f.power.wake == utc(2026, 1, 10, 6, 59));  // one minute early
+    CHECK(f.session.wake_timer_ok());
+
+    // Within the lead time, wake at the alarm itself rather than in the past.
+    f.clock.set(utc(2026, 1, 10, 6, 59, 30));
+    f.session.tick();
+    CHECK(f.power.wake == utc(2026, 1, 10, 7, 0));
+
+    f.clock.set(utc(2026, 1, 10, 7, 0));
+    f.session.tick();
+    CHECK(f.power.awake);
+    f.session.snooze();
+    CHECK_FALSE(f.power.awake);
+    CHECK(f.power.wake == utc(2026, 1, 10, 7, 4));  // snooze ends 07:05, wake 1 min early
+
+    f.session.shutdown();
+    CHECK_FALSE(f.power.wake.has_value());  // app closed: nothing to ring, so don't wake
+}
+
+TEST_CASE("Session reports when the OS refuses the wake timer") {
+    PowerFixture f;
+    f.power.accept = false;
+    f.session.start();
+    CHECK(f.session.wake_timer_ok());  // nothing to schedule yet
+    f.session.save_alarm(Alarm{.time = {7, 0}});
+    CHECK_FALSE(f.session.wake_timer_ok());
+}

@@ -28,6 +28,19 @@ FetchContent_Declare(nlohmann_json
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+# FTXUI: full-screen terminal UI.
+set(FTXUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(FTXUI_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(FTXUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(FTXUI_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(FTXUI_QUIET ON CACHE BOOL "" FORCE)
+FetchContent_Declare(ftxui
+  URL      https://github.com/ArthurSonzogni/FTXUI/archive/refs/tags/v5.0.0.tar.gz
+  URL_HASH SHA256=a2991cb222c944aee14397965d9f6b050245da849d8c5da7c72d112de2786b5b
+  DOWNLOAD_EXTRACT_TIMESTAMP ON
+)
+FetchContent_MakeAvailable(ftxui)
+
 if(ALARM_BUILD_TESTS)
   FetchContent_Declare(Catch2
     URL      https://github.com/catchorg/Catch2/archive/refs/tags/v3.7.1.tar.gz

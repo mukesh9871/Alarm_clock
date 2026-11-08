@@ -22,7 +22,9 @@ struct AlarmOptions {
     std::optional<int> fade_in_seconds;
 };
 
-struct Run {};
+struct Run {
+    bool plain = false;  // line-based output instead of the full-screen UI
+};
 struct List {};
 struct Add { AlarmOptions options; };
 struct Edit { int id; AlarmOptions options; };

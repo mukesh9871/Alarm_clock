@@ -1,11 +1,13 @@
 #include "app/cli.hpp"
 #include "app/commands.hpp"
 #include "app/console_ui.hpp"
+#include "app/tui.hpp"
 #include "app/session.hpp"
 #include "core/clock.hpp"
 #include "core/time_zone.hpp"
 #include "platform/audio_player.hpp"
 #include "platform/paths.hpp"
+#include "platform/power.hpp"
 #include "platform/state_file.hpp"
 
 #include <exception>
@@ -18,6 +20,11 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <io.h>
+#define AC_ISATTY(fd) _isatty(fd)
+#else
+#include <unistd.h>
+#define AC_ISATTY(fd) isatty(fd)
 #endif
 
 #ifndef ALARM_CLOCK_VERSION
@@ -50,8 +57,13 @@ int main(int argc, char** argv) {
         }
 
         auto audio = ac::make_audio_player();
-        ac::AlarmSession session(file, clock, tz, *audio, ac::resolve_sound);
-        return ac::run_console(session);
+        auto power = ac::make_power_manager();
+        ac::AlarmSession session(file, clock, tz, *audio, ac::resolve_sound, power.get());
+
+        // The full-screen UI needs a real terminal; fall back to plain output when piped.
+        const bool interactive = AC_ISATTY(0) && AC_ISATTY(1);
+        if (std::get<ac::cli::Run>(inv.command).plain || !interactive) return ac::run_console(session);
+        return ac::run_tui(session);
     } catch (const ac::cli::UsageError& e) {
         std::cerr << "alarm_clock: " << e.what() << "\nRun 'alarm_clock help' for usage.\n";
         return 2;

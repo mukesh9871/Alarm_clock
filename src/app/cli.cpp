@@ -86,7 +86,13 @@ Invocation parse(const std::vector<std::string>& all_args) {
 
     const std::string cmd = r.next("command");
     if (cmd == "run") {
-        inv.command = Run{};
+        Run run;
+        if (!r.done()) {
+            const std::string flag = r.next("option");
+            if (flag != "--plain") throw UsageError("unknown option '" + flag + "' for run (did you mean --plain?)");
+            run.plain = true;
+        }
+        inv.command = run;
     } else if (cmd == "list" || cmd == "ls") {
         inv.command = List{};
     } else if (cmd == "add") {
@@ -139,7 +145,7 @@ std::string usage() {
     return R"(Usage: alarm_clock [--data FILE] [COMMAND]
 
 Commands:
-  (none) | run              Show the clock and ring alarms
+  (none) | run [--plain]    Show the clock and ring alarms (--plain: simple line output)
   list                      List alarms
   add TIME [options]        Add an alarm, e.g.  add 6:45 --days weekdays --label "Gym"
   edit ID [options]         Change an alarm,    e.g.  edit 2 --time 7:00

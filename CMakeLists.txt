@@ -34,6 +34,7 @@ target_link_libraries(alarm_core PRIVATE alarm_warnings nlohmann_json::nlohmann_
 add_library(alarm_platform STATIC
   src/platform/audio_player.cpp
   src/platform/paths.cpp
+  src/platform/power.cpp
   src/platform/state_file.cpp
 )
 target_include_directories(alarm_platform PUBLIC src)
@@ -41,13 +42,15 @@ target_link_libraries(alarm_platform PUBLIC alarm_core PRIVATE alarm_warnings mi
 
 # ---- Application logic (testable) and executable ----
 add_library(alarm_app STATIC
+  src/app/big_digits.cpp
   src/app/cli.cpp
   src/app/commands.cpp
   src/app/console_ui.cpp
   src/app/session.cpp
+  src/app/tui.cpp
 )
 target_include_directories(alarm_app PUBLIC src)
-target_link_libraries(alarm_app PUBLIC alarm_core alarm_platform PRIVATE alarm_warnings)
+target_link_libraries(alarm_app PUBLIC alarm_core alarm_platform PRIVATE alarm_warnings ftxui::component)
 
 add_executable(alarm_clock src/app/main.cpp)
 target_link_libraries(alarm_clock PRIVATE alarm_app alarm_warnings)

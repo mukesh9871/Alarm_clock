@@ -14,8 +14,14 @@ constexpr auto kLastSeenInterval = 60s;  // how often "still running" is recorde
 }
 
 AlarmSession::AlarmSession(StateFile& file, const Clock& clock, const TimeZone& tz, AudioPlayer& audio,
-                           SoundResolver resolve_sound)
-    : file_(file), clock_(clock), tz_(tz), audio_(audio), resolve_sound_(std::move(resolve_sound)), service_(tz) {}
+                           SoundResolver resolve_sound, PowerManager* power)
+    : file_(file),
+      clock_(clock),
+      tz_(tz),
+      audio_(audio),
+      resolve_sound_(std::move(resolve_sound)),
+      power_(power),
+      service_(tz) {}
 
 std::vector<Notice> AlarmSession::start() {
     std::vector<Notice> notices;
@@ -36,6 +42,7 @@ std::vector<Notice> AlarmSession::start() {
 
     auto events = to_notices(service_.tick(now), /*at_startup=*/true);
     notices.insert(notices.end(), events.begin(), events.end());
+    update_power();
     persist();
     return notices;
 }
@@ -68,6 +75,11 @@ std::vector<Notice> AlarmSession::tick() {
 
 void AlarmSession::shutdown() {
     audio_.stop();
+    if (power_ != nullptr) {
+        // The app won't be running to ring, so don't wake the computer for nothing.
+        power_->keep_awake(false);
+        power_->schedule_wake(std::nullopt);
+    }
     persist();
 }
 
@@ -182,6 +194,18 @@ void AlarmSession::persist_if_changed() {
 
 void AlarmSession::stop_audio_if_quiet() {
     if (service_.ringing().empty() && audio_.is_playing()) audio_.stop();
+    update_power();
+}
+
+void AlarmSession::update_power() {
+    if (power_ == nullptr) return;
+    power_->keep_awake(!service_.ringing().empty());
+    std::optional<TimePoint> wake;
+    if (auto next = service_.next_due()) {
+        // Wake a little early; if that moment has passed, the alarm time itself is still in the future.
+        wake = next->second - kWakeLead > clock_.now() ? next->second - kWakeLead : next->second;
+    }
+    wake_ok_ = power_->schedule_wake(wake) || !wake;
 }
 
 }  // namespace ac

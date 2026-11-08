@@ -41,6 +41,9 @@ TEST_CASE("cli::parse: other commands") {
     CHECK(edit.options.time == TimeOfDay{19, 0});
     CHECK_FALSE(edit.options.label.has_value());
     CHECK(std::holds_alternative<cli::List>(cli::parse({"list"}).command));
+    CHECK(std::get<cli::Run>(cli::parse({"run", "--plain"}).command).plain);
+    CHECK_FALSE(std::get<cli::Run>(cli::parse({"run"}).command).plain);
+    CHECK_THROWS_AS(cli::parse({"run", "--fancy"}), cli::UsageError);
     CHECK(std::holds_alternative<cli::Help>(cli::parse({"--help"}).command));
 }
 
