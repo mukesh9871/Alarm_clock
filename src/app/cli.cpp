@@ -1,5 +1,7 @@
 #include "app/cli.hpp"
 
+#include "core/duration.hpp"
+
 #include <charconv>
 
 namespace ac::cli {
@@ -57,6 +59,10 @@ AlarmOptions parse_options(ArgReader& r) {
             o.sound = r.next("value for --sound");
         } else if (flag == "--fade") {
             o.fade_in_seconds = parse_int(r.next("value for --fade"), "--fade", 0, 600);
+        } else if (flag == "--challenge") {
+            const auto& v = r.next("value for --challenge");
+            o.challenge = parse_challenge(v);
+            if (!o.challenge) throw UsageError("--challenge must be 'math' or 'none'");
         } else {
             throw UsageError("unknown option '" + flag + "'");
         }
@@ -105,6 +111,7 @@ Invocation parse(const std::vector<std::string>& all_args) {
         add.options.snooze_minutes = rest.snooze_minutes;
         add.options.sound = rest.sound;
         add.options.fade_in_seconds = rest.fade_in_seconds;
+        add.options.challenge = rest.challenge;
         inv.command = add;
         return inv;
     } else if (cmd == "edit") {
@@ -130,6 +137,23 @@ Invocation parse(const std::vector<std::string>& all_args) {
         } else {
             throw UsageError("hour-format must be 12 or 24");
         }
+    } else if (cmd == "bedtime" || cmd == "sleep") {
+        Bedtime b;
+        if (!r.done()) b.wake = parse_time_arg(r.next("wake-up time"));
+        inv.command = b;
+    } else if (cmd == "timer") {
+        const std::string& text = r.next("timer length, e.g. 'timer 10m'");
+        const auto d = parse_duration(text);
+        if (!d) throw UsageError("'" + text + "' is not a valid length. Try 90s, 10m, 1h30m or 25:00 (max 24h)");
+        Timer t{*d, {}};
+        while (!r.done()) {
+            const std::string flag = r.next("option");
+            if (flag != "--label" && flag != "-l") throw UsageError("unknown option '" + flag + "' for timer");
+            t.label = r.next("value for --label");
+        }
+        inv.command = t;
+    } else if (cmd == "stopwatch") {
+        inv.command = Stopwatch{};
     } else if (cmd == "help" || cmd == "--help" || cmd == "-h") {
         inv.command = Help{};
     } else if (cmd == "version" || cmd == "--version") {
@@ -152,6 +176,10 @@ Commands:
   remove ID                 Delete an alarm
   enable ID | disable ID    Turn an alarm on or off
   set hour-format 12|24     Choose 12- or 24-hour display
+  bedtime [WAKE_TIME]       When to sleep to wake at WAKE_TIME between sleep cycles
+                            (no time: when to wake if you go to bed now)
+  timer LENGTH [-l TEXT]    Countdown that rings, e.g.  timer 25m  or  timer 1h30m
+  stopwatch                 Stopwatch with laps
   help | version
 
 Alarm options:
@@ -161,6 +189,7 @@ Alarm options:
       --snooze MINUTES      Snooze length, 1-60 (default 9)
       --sound FILE          WAV/MP3/FLAC to play (default: bundled sound)
       --fade SECONDS        Fade-in time, 0-600 (default 30)
+      --challenge math|none Require solving a math problem to stop (snooze still works)
 
 Global options:
   --data FILE               Use this alarm file instead of the default location

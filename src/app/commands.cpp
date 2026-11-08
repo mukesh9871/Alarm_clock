@@ -1,6 +1,7 @@
 #include "app/commands.hpp"
 
 #include "core/schedule.hpp"
+#include "core/sleep_cycles.hpp"
 #include "core/time_format.hpp"
 
 #include <algorithm>
@@ -18,6 +19,7 @@ void apply_options(const cli::AlarmOptions& o, Alarm& a) {
     if (o.snooze_minutes) a.snooze_minutes = *o.snooze_minutes;
     if (o.sound) a.sound = *o.sound;
     if (o.fade_in_seconds) a.fade_in_seconds = *o.fade_in_seconds;
+    if (o.challenge) a.challenge = *o.challenge;
 }
 
 void print_alarms(const std::vector<Alarm>& alarms, HourFormat fmt, TimePoint now, const TimeZone& tz,
@@ -33,7 +35,8 @@ void print_alarms(const std::vector<Alarm>& alarms, HourFormat fmt, TimePoint no
         << "ON" << "LABEL / NEXT\n";
     for (const Alarm& a : sorted) {
         out << std::left << std::setw(4) << a.id << std::setw(10) << format_time_of_day(a.time, fmt) << std::setw(22)
-            << format_days(a.days) << std::setw(5) << (a.enabled ? "yes" : "no") << a.label;
+            << format_days(a.days) << std::setw(5) << (a.enabled ? "yes" : "no") << a.label
+            << (a.challenge == ChallengeKind::Math ? (a.label.empty() ? "[math]" : " [math]") : "");
         const NextRing next = next_ring ? next_ring(a)
                                         : NextRing{a.enabled ? std::optional{next_occurrence(a.time, now, tz, a.days)}
                                                              : std::nullopt};
@@ -45,6 +48,21 @@ void print_alarms(const std::vector<Alarm>& alarms, HourFormat fmt, TimePoint no
         }
         out << '\n';
     }
+}
+
+void print_bedtimes(const cli::Bedtime& b, HourFormat fmt, TimeOfDay now, std::ostream& out) {
+    auto line = [&](const SleepOption& o) {
+        out << "  " << std::left << std::setw(10) << format_time_of_day(o.time, fmt) << o.cycles << " cycles, "
+            << format_duration(o.sleep) << " of sleep" << (o.cycles >= 5 ? "  (recommended)" : "") << '\n';
+    };
+    if (b.wake) {
+        out << "To wake up at " << format_time_of_day(*b.wake, fmt) << " between sleep cycles, go to bed at:\n";
+        for (const auto& o : bedtimes_for(*b.wake)) line(o);
+    } else {
+        out << "If you go to bed now (" << format_time_of_day(now, fmt) << "), wake up at:\n";
+        for (const auto& o : wake_times_for(now)) line(o);
+    }
+    out << "(Assumes ~" << kDefaultFallAsleep.count() << " minutes to fall asleep and 90-minute cycles.)\n";
 }
 
 int run_command(const cli::Command& cmd, StateFile& file, const Clock& clock, const TimeZone& tz, std::ostream& out,
@@ -103,6 +121,9 @@ int run_command(const cli::Command& cmd, StateFile& file, const Clock& clock, co
                 a->updated_at = now;
                 save();
                 out << "Alarm " << c.id << (c.enabled ? " enabled.\n" : " disabled.\n");
+                return 0;
+            } else if constexpr (std::is_same_v<T, cli::Bedtime>) {
+                print_bedtimes(c, state.settings.hour_format, tz.to_local(now).time_of_day(), out);
                 return 0;
             } else if constexpr (std::is_same_v<T, cli::SetHourFormat>) {
                 state.settings.hour_format = c.format;

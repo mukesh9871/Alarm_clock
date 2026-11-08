@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/alarm_service.hpp"
+#include "core/challenge.hpp"
 #include "core/clock.hpp"
 #include "core/saved_state.hpp"
 #include "core/time_zone.hpp"
@@ -45,7 +46,13 @@ public:
 
     // Act on every ringing alarm.
     void snooze();
-    void dismiss();
+
+    enum class DismissResult { Dismissed, NeedsAnswer, WrongAnswer, NotRinging };
+    // Stops ringing alarms. If one requires a challenge, `answer` must solve challenge();
+    // a wrong answer replaces the problem with a new one.
+    DismissResult dismiss(std::optional<int> answer = std::nullopt);
+    // The problem to solve before the ringing alarm(s) can be stopped, if any.
+    [[nodiscard]] const MathProblem* challenge() const { return problem_ ? &*problem_ : nullptr; }
 
     // Edits from the UI; each is saved immediately.
     int save_alarm(Alarm alarm);
@@ -69,6 +76,7 @@ private:
     void persist_if_changed();
     void stop_audio_if_quiet();
     void update_power();
+    void new_problem();
 
     StateFile& file_;
     const Clock& clock_;
@@ -82,6 +90,8 @@ private:
     Settings settings_;
     SavedState last_saved_;
     std::optional<std::string> save_error_;
+    std::optional<MathProblem> problem_;
+    std::uint32_t problem_counter_ = 0;
     std::string reported_save_error_;
 };
 

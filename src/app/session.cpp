@@ -89,11 +89,25 @@ void AlarmSession::snooze() {
     stop_audio_if_quiet();
 }
 
-void AlarmSession::dismiss() {
+AlarmSession::DismissResult AlarmSession::dismiss(std::optional<int> answer) {
+    if (service_.ringing().empty()) return DismissResult::NotRinging;
+    if (problem_) {
+        if (!answer) return DismissResult::NeedsAnswer;
+        if (*answer != problem_->answer) {
+            new_problem();
+            return DismissResult::WrongAnswer;
+        }
+    }
     const TimePoint now = clock_.now();
     for (int id : service_.ringing()) service_.dismiss(id, now);
     stop_audio_if_quiet();
     persist_if_changed();  // one-shot alarms become disabled
+    return DismissResult::Dismissed;
+}
+
+void AlarmSession::new_problem() {
+    const auto seed = static_cast<std::uint32_t>(clock_.now().time_since_epoch().count()) ^ (++problem_counter_ * 2654435761U);
+    problem_ = make_math_problem(seed);
 }
 
 int AlarmSession::save_alarm(Alarm alarm) {
@@ -148,6 +162,7 @@ std::vector<Notice> AlarmSession::to_notices(const std::vector<AlarmEvent>& even
                 const Alarm* a = service_.find(ev.alarm_id);
                 const bool played = audio_.start(resolve_sound_(a ? a->sound : std::string{}),
                                                  std::chrono::seconds{a ? a->fade_in_seconds : 0});
+                if (a && a->challenge == ChallengeKind::Math && !problem_) new_problem();
                 out.push_back({Notice::Level::Alarm, "ALARM " + name});
                 if (!played) out.push_back({Notice::Level::Warning, "Could not play the alarm sound - beeping instead."});
                 break;
@@ -193,6 +208,7 @@ void AlarmSession::persist_if_changed() {
 }
 
 void AlarmSession::stop_audio_if_quiet() {
+    if (service_.ringing().empty()) problem_.reset();
     if (service_.ringing().empty() && audio_.is_playing()) audio_.stop();
     update_power();
 }

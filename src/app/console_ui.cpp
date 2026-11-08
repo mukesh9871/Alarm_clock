@@ -1,53 +1,27 @@
 #include "app/console_ui.hpp"
 
 #include "app/commands.hpp"
+#include "app/line_input.hpp"
 #include "core/time_format.hpp"
 
-#include <algorithm>
-#include <condition_variable>
-#include <deque>
+#include <charconv>
 #include <iostream>
-#include <mutex>
-#include <optional>
 #include <string>
-#include <thread>
 
 namespace ac {
 
 namespace {
 
-using namespace std::chrono_literals;
-
-// Lines typed by the user, handed from the input thread to the main loop.
-class InputQueue {
-public:
-    void push(std::string line) {
-        {
-            std::lock_guard lock(mutex_);
-            lines_.push_back(std::move(line));
-        }
-        cv_.notify_one();
-    }
-
-    std::optional<std::string> pop_for(std::chrono::milliseconds timeout) {
-        std::unique_lock lock(mutex_);
-        if (!cv_.wait_for(lock, timeout, [this] { return !lines_.empty(); })) return std::nullopt;
-        std::string line = std::move(lines_.front());
-        lines_.pop_front();
-        return line;
-    }
-
-private:
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    std::deque<std::string> lines_;
-};
-
-void print_notices(const std::vector<Notice>& notices) {
+void print_notices(const AlarmSession& s, const std::vector<Notice>& notices) {
     for (const auto& n : notices) {
         switch (n.level) {
             case Notice::Level::Alarm:
-                std::cout << "\n*** " << n.text << " ***   [Enter] stop   [s] snooze\n";
+                std::cout << "\n*** " << n.text << " ***   ";
+                if (const auto* p = s.challenge()) {
+                    std::cout << "Solve to stop: " << p->question << "   [s] snooze\n";
+                } else {
+                    std::cout << "[Enter] stop   [s] snooze\n";
+                }
                 break;
             case Notice::Level::Warning:
                 std::cout << "\n! " << n.text << '\n';
@@ -75,27 +49,24 @@ std::string status_line(const AlarmSession& s) {
     return line;
 }
 
+std::optional<int> parse_answer(const std::string& text) {
+    int v = 0;
+    const auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), v);
+    if (ec != std::errc{} || ptr != text.data() + text.size()) return std::nullopt;
+    return v;
+}
+
 }  // namespace
 
 int run_console(AlarmSession& session) {
-    print_notices(session.start());
+    print_notices(session, session.start());
     std::cout << "Commands: [Enter] stop alarm  [s] snooze  [l] list alarms  [q] quit\n"
                  "Manage alarms from another terminal with 'alarm_clock add/edit/remove' - changes load automatically.\n\n";
 
-    InputQueue input;
-    std::thread reader([&input] {
-        std::string line;
-        while (std::getline(std::cin, line)) {
-            const bool quit = line == "q" || line == "Q";
-            input.push(std::move(line));
-            if (quit) return;
-        }
-        input.push("q");  // stdin closed
-    });
-
+    LineInput input;
     std::size_t last_len = 0;
     for (bool running = true; running;) {
-        print_notices(session.tick());
+        print_notices(session, session.tick());
 
         std::string line = status_line(session);
         const std::size_t len = line.size();
@@ -103,16 +74,14 @@ int run_console(AlarmSession& session) {
         last_len = len;
         std::cout << '\r' << line << std::flush;
 
-        // Sleep until the next whole second, waking early for input.
-        const auto wait = std::chrono::ceil<std::chrono::milliseconds>(
-            std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()) + 1s - std::chrono::system_clock::now());
-        auto cmd = input.pop_for(std::max(wait, 1ms));
+        auto cmd = input.pop_for(LineInput::until_next_second());
         if (!cmd) continue;
+        const bool ringing = !session.service().ringing().empty();
 
-        if (*cmd == "q" || *cmd == "Q") {
+        if (*cmd == "q") {
             running = false;
         } else if (*cmd == "s" || *cmd == "S") {
-            if (!session.service().ringing().empty()) {
+            if (ringing) {
                 session.snooze();
                 std::cout << "\nSnoozed.\n";
             }
@@ -121,15 +90,25 @@ int run_console(AlarmSession& session) {
             const auto& svc = session.service();
             print_alarms(svc.alarms(), session.settings().hour_format, session.now(), session.time_zone(), std::cout,
                          [&svc](const Alarm& a) { return NextRing{svc.next_fire(a.id), svc.is_snoozed(a.id)}; });
-        } else if (!session.service().ringing().empty()) {
-            session.dismiss();
-            std::cout << "\nAlarm stopped.\n";
+        } else if (ringing) {
+            switch (session.dismiss(parse_answer(*cmd))) {
+                case AlarmSession::DismissResult::Dismissed:
+                    std::cout << "\nAlarm stopped.\n";
+                    break;
+                case AlarmSession::DismissResult::NeedsAnswer:
+                    std::cout << "\nSolve to stop: " << session.challenge()->question << '\n';
+                    break;
+                case AlarmSession::DismissResult::WrongAnswer:
+                    std::cout << "\nNot quite. Try this one: " << session.challenge()->question << '\n';
+                    break;
+                case AlarmSession::DismissResult::NotRinging:
+                    break;
+            }
         }
     }
 
     session.shutdown();
     std::cout << "\nBye.\n";
-    reader.join();
     return 0;
 }
 

@@ -21,6 +21,9 @@ void apply_options(const cli::AlarmOptions& o, Alarm& a);
 int run_command(const cli::Command& cmd, StateFile& file, const Clock& clock, const TimeZone& tz, std::ostream& out,
                 std::ostream& err);
 
+// Sleep-cycle based bedtime / wake-time suggestions.
+void print_bedtimes(const cli::Bedtime& b, HourFormat fmt, TimeOfDay now, std::ostream& out);
+
 // When an alarm will next ring, and whether that's a snooze. Default: its next scheduled occurrence.
 struct NextRing {
     std::optional<TimePoint> at;

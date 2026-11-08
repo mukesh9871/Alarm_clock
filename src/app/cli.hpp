@@ -1,8 +1,10 @@
 #pragma once
 
+#include "core/challenge.hpp"
 #include "core/days.hpp"
 #include "core/time_format.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
@@ -20,6 +22,7 @@ struct AlarmOptions {
     std::optional<int> snooze_minutes;
     std::optional<std::string> sound;
     std::optional<int> fade_in_seconds;
+    std::optional<ChallengeKind> challenge;
 };
 
 struct Run {
@@ -31,10 +34,14 @@ struct Edit { int id; AlarmOptions options; };
 struct Remove { int id; };
 struct SetEnabled { int id; bool enabled; };
 struct SetHourFormat { HourFormat format; };
+struct Bedtime { std::optional<TimeOfDay> wake; };  // no time = "if I sleep now"
+struct Timer { std::chrono::seconds duration; std::string label; };
+struct Stopwatch {};
 struct Help {};
 struct Version {};
 
-using Command = std::variant<Run, List, Add, Edit, Remove, SetEnabled, SetHourFormat, Help, Version>;
+using Command =
+    std::variant<Run, List, Add, Edit, Remove, SetEnabled, SetHourFormat, Bedtime, Timer, Stopwatch, Help, Version>;
 
 struct Invocation {
     std::optional<std::filesystem::path> data_file;  // --data <file>

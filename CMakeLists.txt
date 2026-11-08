@@ -27,6 +27,7 @@ add_library(alarm_core STATIC
   src/core/saved_state.cpp
   src/core/schedule.cpp
   src/core/sleep_cycles.cpp
+  src/core/sleep_cycles.cpp
   src/core/time_format.cpp
   src/core/time_zone.cpp
 )
@@ -50,6 +51,7 @@ add_library(alarm_app STATIC
   src/app/commands.cpp
   src/app/console_ui.cpp
   src/app/session.cpp
+  src/app/timers.cpp
   src/app/tui.cpp
 )
 target_include_directories(alarm_app PUBLIC src)

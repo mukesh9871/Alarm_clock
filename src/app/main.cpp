@@ -1,6 +1,7 @@
 #include "app/cli.hpp"
 #include "app/commands.hpp"
 #include "app/console_ui.hpp"
+#include "app/timers.hpp"
 #include "app/tui.hpp"
 #include "app/session.hpp"
 #include "core/clock.hpp"
@@ -47,6 +48,12 @@ int main(int argc, char** argv) {
             std::cout << "alarm_clock " << ALARM_CLOCK_VERSION << '\n';
             return 0;
         }
+
+        if (const auto* t = std::get_if<ac::cli::Timer>(&inv.command)) {
+            auto audio = ac::make_audio_player();
+            return ac::run_timer(t->duration, t->label, *audio, ac::default_sound_path());
+        }
+        if (std::holds_alternative<ac::cli::Stopwatch>(inv.command)) return ac::run_stopwatch();
 
         ac::SystemClock clock;
         ac::SystemTimeZone tz;
