@@ -1,4 +1,4 @@
-name: Build
+name: Build & Test
 
 on:
   push:
@@ -7,13 +7,38 @@ on:
     branches: [ "master" ]
 
 jobs:
-  build-windows-mingw:
-    # alarm.cpp currently depends on Win32 + pthreads, so only MinGW on Windows can build it.
-    # The portable rewrite (Phase 1) restores the Linux/macOS/MSVC matrix.
-    runs-on: windows-latest
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "Linux GCC",     os: ubuntu-latest,  cc: gcc,   cxx: g++ }
+          - { name: "Linux Clang",   os: ubuntu-latest,  cc: clang, cxx: clang++ }
+          - { name: "Windows MSVC",  os: windows-latest, cc: cl,    cxx: cl }
+          - { name: "Windows MinGW", os: windows-latest, cc: gcc,   cxx: g++ }
+          - { name: "macOS Clang",   os: macos-latest,   cc: clang, cxx: clang++ }
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up MSVC environment
+        if: matrix.cxx == 'cl'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
       - name: Configure
-        run: cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=${{ matrix.cc }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+
       - name: Build
         run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

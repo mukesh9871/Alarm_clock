@@ -1,21 +1,53 @@
-cmake_minimum_required(VERSION 3.20)
-project(AlarmClock LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.24)
+project(AlarmClock VERSION 1.0.0 LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-if(NOT WIN32)
-  message(FATAL_ERROR "The current alarm.cpp uses Win32 APIs (windows.h, winmm) and only builds on Windows.")
+option(ALARM_BUILD_TESTS "Build unit tests" ON)
+
+include(cmake/Dependencies.cmake)
+
+# Warnings for our own code only (third-party targets are left alone).
+add_library(alarm_warnings INTERFACE)
+if(MSVC)
+  target_compile_options(alarm_warnings INTERFACE /W4 /permissive- /utf-8)
+else()
+  target_compile_options(alarm_warnings INTERFACE -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion)
 endif()
 
-add_executable(alarm_clock alarm.cpp)
-target_link_libraries(alarm_clock PRIVATE winmm)
+# ---- Core library: pure logic, no I/O, fully unit-tested ----
+add_library(alarm_core STATIC
+  src/core/alarm_service.cpp
+  src/core/schedule.cpp
+  src/core/time_format.cpp
+  src/core/time_zone.cpp
+)
+target_include_directories(alarm_core PUBLIC src)
+target_link_libraries(alarm_core PRIVATE alarm_warnings)
 
-find_package(Threads REQUIRED)
-target_link_libraries(alarm_clock PRIVATE Threads::Threads)
+# ---- Platform layer: audio, paths ----
+add_library(alarm_platform STATIC
+  src/platform/audio_player.cpp
+  src/platform/paths.cpp
+)
+target_include_directories(alarm_platform PUBLIC src)
+target_link_libraries(alarm_platform PUBLIC alarm_core PRIVATE alarm_warnings miniaudio)
 
-# The program loads music1.wav from the working directory; copy it next to the binary.
+# ---- Application ----
+add_executable(alarm_clock src/app/main.cpp)
+target_link_libraries(alarm_clock PRIVATE alarm_core alarm_platform alarm_warnings)
+
 add_custom_command(TARGET alarm_clock POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          ${CMAKE_SOURCE_DIR}/music1.wav $<TARGET_FILE_DIR:alarm_clock>/music1.wav)
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          ${CMAKE_SOURCE_DIR}/assets/sounds $<TARGET_FILE_DIR:alarm_clock>/sounds)
+
+install(TARGETS alarm_clock RUNTIME DESTINATION .)
+install(DIRECTORY assets/sounds DESTINATION .)
+
+if(ALARM_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()

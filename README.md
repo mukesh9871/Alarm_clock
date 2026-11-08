@@ -1,30 +1,44 @@
 # Alarm Clock
 
-A console alarm clock written in C++.
+A reliable, cross-platform console alarm clock written in modern C++20.
 
-> This is the original 2017 learning project. It is being modernised in phases
-> (see the `modernize` branch history).
+- Live clock that updates in place
+- Alarm sound loops and fades in without freezing the clock (via [miniaudio](https://miniaud.io));
+  falls back to a beep if the sound file or audio device is unavailable
+- Never silently misses an alarm: if the computer was busy or briefly suspended, the alarm still rings;
+  if it was asleep for a long time, you're told it was missed
+- Correct across midnight and daylight-saving changes (unit-tested)
+- Accepts `07:30`, `19:05`, `7:30pm`, `12am`, ...
 
 ## Build
 
-Requirements: Windows, a MinGW-w64 GCC toolchain, CMake 3.20+ and Ninja.
+Requirements: a C++20 compiler (GCC 11+, Clang 14+, MSVC 2022), CMake 3.24+ and Ninja.
+Dependencies (miniaudio, Catch2) are downloaded automatically and verified by SHA-256.
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
+ctest --test-dir build --output-on-failure   # run the unit tests
 ```
 
 ## Run
 
 ```sh
-./build/alarm_clock.exe
+./build/alarm_clock
 ```
 
-Answer `y` to set an alarm, then enter the hour (24-hour format) and minute.
-The current time prints every second; when the alarm time is reached, `music1.wav`
-plays. Press **Enter** to quit.
+Answer `y`, enter a time, and leave it running. Press **Enter** to stop a ringing alarm,
+type **q** + Enter to quit.
 
-![Sample output](https://github.com/mukesh9871/Alarm_clock/assets/19510273/2f059fce-4b29-42a9-a65a-d3c12750af6d)
+## Project layout
+
+| Path | Contents |
+|---|---|
+| `src/core/` | Pure logic: scheduling, time zones, parsing/formatting. No I/O; fully unit-tested. |
+| `src/platform/` | OS-specific bits: audio playback, executable paths. |
+| `src/app/` | The console application. |
+| `tests/` | Catch2 unit tests, including a fake DST time zone for edge cases. |
+| `assets/sounds/` | Bundled alarm sound, copied next to the executable at build time. |
 
 ## License
 
