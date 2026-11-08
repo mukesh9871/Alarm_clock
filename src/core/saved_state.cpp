@@ -24,6 +24,7 @@ json alarm_to_json(const Alarm& a) {
         {"snooze_minutes", a.snooze_minutes},
         {"sound", a.sound},
         {"fade_in_seconds", a.fade_in_seconds},
+        {"challenge", challenge_to_string(a.challenge)},
         {"updated_unix", a.updated_at.time_since_epoch().count()},
     };
 }
@@ -48,6 +49,10 @@ Alarm alarm_from_json(const json& j) {
     a.snooze_minutes = std::clamp(j.value("snooze_minutes", 9), 1, 60);
     a.sound = j.value("sound", std::string{});
     a.fade_in_seconds = std::clamp(j.value("fade_in_seconds", 30), 0, 600);
+    const auto challenge_text = j.value("challenge", std::string{"none"});
+    const auto challenge = parse_challenge(challenge_text);
+    if (!challenge) throw StateFormatError("alarm " + std::to_string(a.id) + ": invalid challenge '" + challenge_text + "'");
+    a.challenge = *challenge;
     a.updated_at = TimePoint{std::chrono::seconds{j.value("updated_unix", std::int64_t{0})}};
     return a;
 }

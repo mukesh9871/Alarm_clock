@@ -21,9 +21,12 @@ endif()
 # ---- Core library: pure logic, no I/O, fully unit-tested ----
 add_library(alarm_core STATIC
   src/core/alarm_service.cpp
+  src/core/challenge.cpp
   src/core/days.cpp
+  src/core/duration.cpp
   src/core/saved_state.cpp
   src/core/schedule.cpp
+  src/core/sleep_cycles.cpp
   src/core/time_format.cpp
   src/core/time_zone.cpp
 )
