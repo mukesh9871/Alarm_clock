@@ -121,6 +121,48 @@ TEST_CASE("Session picks up alarms added from another process") {
     CHECK(f.session.service().next_fire(1) == utc(2026, 1, 10, 6, 10));
 }
 
+TEST_CASE("Math challenge must be solved to stop, but snooze still works") {
+    Fixture f;
+    f.session.start();
+    f.session.save_alarm(Alarm{.time = {6, 30}, .snooze_minutes = 5, .challenge = ChallengeKind::Math});
+    f.clock.set(utc(2026, 1, 10, 6, 30));
+    f.session.tick();
+
+    const MathProblem* p = f.session.challenge();
+    REQUIRE(p != nullptr);
+    CHECK(f.session.dismiss() == AlarmSession::DismissResult::NeedsAnswer);
+    CHECK(f.audio.playing);
+
+    const std::string first = p->question;
+    const int wrong = p->answer + 1;
+    CHECK(f.session.dismiss(wrong) == AlarmSession::DismissResult::WrongAnswer);
+    CHECK(f.audio.playing);
+    REQUIRE(f.session.challenge() != nullptr);
+
+    // Snoozing is allowed without solving.
+    f.session.snooze();
+    CHECK_FALSE(f.audio.playing);
+    CHECK(f.session.challenge() == nullptr);
+
+    f.clock.set(utc(2026, 1, 10, 6, 35));
+    f.session.tick();
+    REQUIRE(f.session.challenge() != nullptr);
+    CHECK(f.session.dismiss(f.session.challenge()->answer) == AlarmSession::DismissResult::Dismissed);
+    CHECK_FALSE(f.audio.playing);
+    CHECK(f.session.challenge() == nullptr);
+    CHECK(f.session.dismiss() == AlarmSession::DismissResult::NotRinging);
+}
+
+TEST_CASE("Alarms without a challenge stop immediately") {
+    Fixture f;
+    f.session.start();
+    f.session.save_alarm(Alarm{.time = {6, 30}});
+    f.clock.set(utc(2026, 1, 10, 6, 30));
+    f.session.tick();
+    CHECK(f.session.challenge() == nullptr);
+    CHECK(f.session.dismiss() == AlarmSession::DismissResult::Dismissed);
+}
+
 TEST_CASE("Session falls back to a beep warning when the sound can't play") {
     Fixture f;
     f.audio.succeed = false;

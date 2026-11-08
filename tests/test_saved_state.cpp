@@ -23,6 +23,7 @@ SavedState sample() {
                              .snooze_minutes = 5,
                              .sound = "C:/sounds/bell.mp3",
                              .fade_in_seconds = 0,
+                             .challenge = ChallengeKind::Math,
                              .updated_at = utc(2026, 5, 1, 12)});
     s.last_seen = utc(2026, 11, 8, 6, 0);
     return s;
@@ -58,6 +59,8 @@ TEST_CASE("state_from_json rejects malformed input with a reason") {
         state_from_json(R"({"version":1,"alarms":[{"id":1,"time":"07:00"},{"id":1,"time":"08:00"}]})"),
         ContainsSubstring("duplicate"));
     CHECK_THROWS_AS(state_from_json(R"({"version":1,"alarms":[{"time":"07:00"}]})"), StateFormatError);
+    CHECK_THROWS_WITH(state_from_json(R"({"version":1,"alarms":[{"id":1,"time":"07:00","challenge":"chess"}]})"),
+                      ContainsSubstring("invalid challenge"));
 }
 
 TEST_CASE("StateFile: missing file loads empty, save then load round-trips") {

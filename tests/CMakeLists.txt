@@ -3,6 +3,7 @@ add_executable(alarm_tests
   test_big_digits.cpp
   test_cli.cpp
   test_days.cpp
+  test_extras.cpp
   test_saved_state.cpp
   test_schedule.cpp
   test_session.cpp

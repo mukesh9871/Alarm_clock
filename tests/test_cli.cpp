@@ -44,6 +44,16 @@ TEST_CASE("cli::parse: other commands") {
     CHECK(std::get<cli::Run>(cli::parse({"run", "--plain"}).command).plain);
     CHECK_FALSE(std::get<cli::Run>(cli::parse({"run"}).command).plain);
     CHECK_THROWS_AS(cli::parse({"run", "--fancy"}), cli::UsageError);
+    CHECK(std::get<cli::Add>(cli::parse({"add", "7:00", "--challenge", "math"}).command).options.challenge ==
+          ChallengeKind::Math);
+    CHECK_THROWS_WITH(cli::parse({"add", "7:00", "--challenge", "chess"}), ContainsSubstring("--challenge"));
+    CHECK(std::get<cli::Bedtime>(cli::parse({"bedtime", "6:30"}).command).wake == TimeOfDay{6, 30});
+    CHECK_FALSE(std::get<cli::Bedtime>(cli::parse({"bedtime"}).command).wake.has_value());
+    const auto t = std::get<cli::Timer>(cli::parse({"timer", "1h30m", "-l", "Tea"}).command);
+    CHECK(t.duration == std::chrono::minutes{90});
+    CHECK(t.label == "Tea");
+    CHECK_THROWS_WITH(cli::parse({"timer", "soon"}), ContainsSubstring("not a valid length"));
+    CHECK(std::holds_alternative<cli::Stopwatch>(cli::parse({"stopwatch"}).command));
     CHECK(std::holds_alternative<cli::Help>(cli::parse({"--help"}).command));
 }
 
@@ -93,4 +103,19 @@ TEST_CASE("run_command edits the alarm file") {
     CHECK(state.alarms[0].time == TimeOfDay{8, 15});
     CHECK(state.alarms[0].label == "Late");
     CHECK(state.alarms[0].updated_at == clock.now());
+}
+
+TEST_CASE("run_command bedtime prints suggestions") {
+    TempDir dir;
+    StateFile file(dir.path() / "alarms.json");
+    FakeClock clock(utc(2026, 1, 10, 23, 0));
+    const TestZone tz{minutes{0}};
+    std::ostringstream out, err;
+    REQUIRE(run_command(cli::parse({"bedtime", "7:00"}).command, file, clock, tz, out, err) == 0);
+    CHECK_THAT(out.str(), ContainsSubstring("21:45"));
+    CHECK_THAT(out.str(), ContainsSubstring("6 cycles, 9h 0m of sleep"));
+    out.str("");
+    REQUIRE(run_command(cli::parse({"bedtime"}).command, file, clock, tz, out, err) == 0);
+    CHECK_THAT(out.str(), ContainsSubstring("If you go to bed now (23:00)"));
+    CHECK_THAT(out.str(), ContainsSubstring("03:45"));  // 23:00 + 15m + 3 cycles (4h30m)
 }

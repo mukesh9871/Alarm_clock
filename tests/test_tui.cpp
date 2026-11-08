@@ -64,3 +64,15 @@ TEST_CASE("TUI shows the ringing overlay") {
     CHECK_THAT(s, ContainsSubstring("Wake up"));
     CHECK_THAT(s, ContainsSubstring("snooze"));
 }
+
+TEST_CASE("TUI ringing overlay shows the math challenge") {
+    Fixture f;
+    f.session.start();
+    f.session.save_alarm(Alarm{.time = {6, 1}, .label = "Up", .challenge = ChallengeKind::Math});
+    f.clock.set(utc(2026, 1, 10, 6, 1));
+    f.session.tick();
+    REQUIRE(f.session.challenge() != nullptr);
+    const auto s = f.snap();
+    CHECK_THAT(s, ContainsSubstring("Solve to stop"));
+    CHECK_THAT(s, ContainsSubstring(f.session.challenge()->question));
+}
