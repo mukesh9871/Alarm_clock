@@ -1,0 +1,62 @@
+name: Release
+
+# Push a tag like v1.0.0 to build, test and publish ZIPs for Windows, Linux and macOS.
+on:
+  push:
+    tags: [ "v*" ]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package ${{ matrix.suffix }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: windows-latest, cc: cl,    cxx: cl,      suffix: windows-x64 }
+          - { os: ubuntu-latest,  cc: gcc,   cxx: g++,     suffix: linux-x64 }
+          - { os: macos-latest,   cc: clang, cxx: clang++, suffix: macos-arm64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC environment
+        if: matrix.cxx == 'cl'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - uses: seanmiddleditch/gha-setup-ninja@v5
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=${{ matrix.cc }} -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DALARM_PACKAGE_SUFFIX=${{ matrix.suffix }}
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package
+        run: cpack --config build/CPackConfig.cmake -B dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alarm_clock-${{ matrix.suffix }}
+          path: dist/*.zip
+
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true
