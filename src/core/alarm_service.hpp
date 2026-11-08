@@ -11,53 +11,74 @@ namespace ac {
 
 struct AlarmEvent {
     enum class Kind {
-        Ring,    // alarm is due now (or only slightly late) - start ringing
-        Missed,  // alarm was due long ago (e.g. PC was asleep) - report, don't ring
+        Ring,         // alarm is due now (or only slightly late) - start ringing
+        Missed,       // alarm was due long ago (e.g. PC asleep or app closed) - report, don't ring
+        AutoSnoozed,  // rang unanswered for ring_timeout - snoozed automatically
+        TimedOut,     // auto-snoozed too many times - gave up
     };
     Kind kind;
     int alarm_id;
     TimePoint scheduled;
-    std::chrono::seconds late;
+    std::chrono::seconds late{0};
+};
+
+struct ServiceConfig {
+    std::chrono::minutes missed_grace{30};  // later than this = Missed instead of Ring
+    std::chrono::minutes ring_timeout{10};  // unanswered ringing auto-snoozes after this
+    int max_auto_snoozes = 3;               // then the alarm stops for this occurrence
 };
 
 // Owns the alarms and decides, on each tick, which ones fire.
 // Pure logic: no threads, no I/O, no real clock - drive it with tick(now).
 class AlarmService {
 public:
-    explicit AlarmService(const TimeZone& tz, std::chrono::minutes missed_grace = std::chrono::minutes{30});
+    explicit AlarmService(const TimeZone& tz, ServiceConfig config = {});
 
-    // Adds (or, if the id exists, replaces) an alarm and arms it relative to `now`. Returns its id.
-    int upsert(Alarm alarm, TimePoint now);
+    // Adds (or, if the id exists, replaces) an alarm and arms it: it will fire at its
+    // first occurrence strictly after `arm_from`. Returns its id.
+    int upsert(Alarm alarm, TimePoint arm_from);
     bool remove(int id);
     bool set_enabled(int id, bool enabled, TimePoint now);
+
+    // Makes the alarm list match `wanted` (e.g. after the file was edited elsewhere).
+    // Unchanged alarms keep their runtime state (ringing, snoozed); others are (re)armed.
+    void sync(const std::vector<Alarm>& wanted, TimePoint now);
 
     [[nodiscard]] const Alarm* find(int id) const;
     [[nodiscard]] std::vector<Alarm> alarms() const;
     [[nodiscard]] std::optional<TimePoint> next_fire(int id) const;
-    // The soonest armed alarm, if any.
-    [[nodiscard]] std::optional<std::pair<int, TimePoint>> next_due() const;
+    [[nodiscard]] std::optional<std::pair<int, TimePoint>> next_due() const;  // soonest armed alarm
     [[nodiscard]] std::vector<int> ringing() const;
+    [[nodiscard]] bool is_snoozed(int id) const;
 
     // Advances time. Fires every alarm whose scheduled time is <= now.
     std::vector<AlarmEvent> tick(TimePoint now);
 
-    // Stops a ringing alarm and re-arms (or disables, for one-shot alarms).
+    // Stops a ringing alarm and re-arms it (repeating) or disables it (one-shot).
     void dismiss(int id, TimePoint now);
+    // Stops a ringing alarm and rings again after its snooze interval.
+    void snooze(int id, TimePoint now);
+
+    [[nodiscard]] const ServiceConfig& config() const { return config_; }
+    void set_config(ServiceConfig config) { config_ = config; }
 
 private:
     struct Entry {
         Alarm alarm;
-        std::optional<TimePoint> next;
-        bool ringing = false;
+        std::optional<TimePoint> next{};
+        std::optional<TimePoint> ring_started{};  // set while ringing
+        bool snoozed = false;
+        int auto_snoozes = 0;
     };
 
     Entry* entry(int id);
     [[nodiscard]] const Entry* entry(int id) const;
-    void arm(Entry& e, TimePoint now);
+    void arm(Entry& e, TimePoint from);
     void finish(Entry& e, TimePoint now);
+    void snooze_entry(Entry& e, TimePoint now);
 
     const TimeZone& tz_;
-    std::chrono::minutes missed_grace_;
+    ServiceConfig config_;
     std::vector<Entry> entries_;
     int next_id_ = 1;
 };

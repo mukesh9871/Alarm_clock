@@ -21,24 +21,37 @@ endif()
 # ---- Core library: pure logic, no I/O, fully unit-tested ----
 add_library(alarm_core STATIC
   src/core/alarm_service.cpp
+  src/core/days.cpp
+  src/core/saved_state.cpp
   src/core/schedule.cpp
   src/core/time_format.cpp
   src/core/time_zone.cpp
 )
 target_include_directories(alarm_core PUBLIC src)
-target_link_libraries(alarm_core PRIVATE alarm_warnings)
+target_link_libraries(alarm_core PRIVATE alarm_warnings nlohmann_json::nlohmann_json)
 
-# ---- Platform layer: audio, paths ----
+# ---- Platform layer: audio, paths, files ----
 add_library(alarm_platform STATIC
   src/platform/audio_player.cpp
   src/platform/paths.cpp
+  src/platform/state_file.cpp
 )
 target_include_directories(alarm_platform PUBLIC src)
 target_link_libraries(alarm_platform PUBLIC alarm_core PRIVATE alarm_warnings miniaudio)
 
-# ---- Application ----
+# ---- Application logic (testable) and executable ----
+add_library(alarm_app STATIC
+  src/app/cli.cpp
+  src/app/commands.cpp
+  src/app/console_ui.cpp
+  src/app/session.cpp
+)
+target_include_directories(alarm_app PUBLIC src)
+target_link_libraries(alarm_app PUBLIC alarm_core alarm_platform PRIVATE alarm_warnings)
+
 add_executable(alarm_clock src/app/main.cpp)
-target_link_libraries(alarm_clock PRIVATE alarm_core alarm_platform alarm_warnings)
+target_link_libraries(alarm_clock PRIVATE alarm_app alarm_warnings)
+target_compile_definitions(alarm_clock PRIVATE ALARM_CLOCK_VERSION="${PROJECT_VERSION}")
 
 add_custom_command(TARGET alarm_clock POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory

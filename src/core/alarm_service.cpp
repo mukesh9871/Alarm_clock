@@ -3,14 +3,14 @@
 #include "core/schedule.hpp"
 
 #include <algorithm>
+#include <tuple>
 
 namespace ac {
 
-AlarmService::AlarmService(const TimeZone& tz, std::chrono::minutes missed_grace)
-    : tz_(tz), missed_grace_(missed_grace) {}
+AlarmService::AlarmService(const TimeZone& tz, ServiceConfig config) : tz_(tz), config_(config) {}
 
-int AlarmService::upsert(Alarm alarm, TimePoint now) {
-    if (alarm.id == 0) alarm.id = next_id_;
+int AlarmService::upsert(Alarm alarm, TimePoint arm_from) {
+    if (alarm.id <= 0) alarm.id = next_id_;
     next_id_ = std::max(next_id_, alarm.id + 1);
 
     Entry* e = entry(alarm.id);
@@ -18,9 +18,8 @@ int AlarmService::upsert(Alarm alarm, TimePoint now) {
         entries_.push_back(Entry{});
         e = &entries_.back();
     }
-    e->alarm = std::move(alarm);
-    e->ringing = false;
-    arm(*e, now);
+    *e = Entry{.alarm = std::move(alarm)};
+    arm(*e, arm_from);
     return e->alarm.id;
 }
 
@@ -34,10 +33,20 @@ bool AlarmService::remove(int id) {
 bool AlarmService::set_enabled(int id, bool enabled, TimePoint now) {
     Entry* e = entry(id);
     if (e == nullptr) return false;
-    e->alarm.enabled = enabled;
-    e->ringing = false;
-    arm(*e, now);
+    Alarm a = e->alarm;
+    a.enabled = enabled;
+    upsert(std::move(a), now);
     return true;
+}
+
+void AlarmService::sync(const std::vector<Alarm>& wanted, TimePoint now) {
+    std::erase_if(entries_, [&](const Entry& e) {
+        return std::none_of(wanted.begin(), wanted.end(), [&](const Alarm& a) { return a.id == e.alarm.id; });
+    });
+    for (const Alarm& a : wanted) {
+        const Entry* existing = entry(a.id);
+        if (existing == nullptr || !(existing->alarm == a)) upsert(a, now);
+    }
 }
 
 const Alarm* AlarmService::find(int id) const {
@@ -49,6 +58,9 @@ std::vector<Alarm> AlarmService::alarms() const {
     std::vector<Alarm> out;
     out.reserve(entries_.size());
     for (const auto& e : entries_) out.push_back(e.alarm);
+    std::sort(out.begin(), out.end(), [](const Alarm& a, const Alarm& b) {
+        return std::tie(a.time, a.id) < std::tie(b.time, b.id);
+    });
     return out;
 }
 
@@ -68,22 +80,41 @@ std::optional<std::pair<int, TimePoint>> AlarmService::next_due() const {
 std::vector<int> AlarmService::ringing() const {
     std::vector<int> out;
     for (const auto& e : entries_) {
-        if (e.ringing) out.push_back(e.alarm.id);
+        if (e.ring_started) out.push_back(e.alarm.id);
     }
     return out;
+}
+
+bool AlarmService::is_snoozed(int id) const {
+    const Entry* e = entry(id);
+    return e && e->snoozed;
 }
 
 std::vector<AlarmEvent> AlarmService::tick(TimePoint now) {
     std::vector<AlarmEvent> events;
     for (auto& e : entries_) {
+        if (e.ring_started) {
+            if (now - *e.ring_started < config_.ring_timeout) continue;
+            if (e.auto_snoozes < config_.max_auto_snoozes) {
+                events.push_back({AlarmEvent::Kind::AutoSnoozed, e.alarm.id, *e.ring_started});
+                ++e.auto_snoozes;
+                snooze_entry(e, now);
+            } else {
+                events.push_back({AlarmEvent::Kind::TimedOut, e.alarm.id, *e.ring_started});
+                finish(e, now);
+            }
+            continue;
+        }
+
         if (!e.next || *e.next > now) continue;
 
         const TimePoint scheduled = *e.next;
         const auto late = now - scheduled;
-        if (late <= missed_grace_) {
+        if (late <= config_.missed_grace) {
             events.push_back({AlarmEvent::Kind::Ring, e.alarm.id, scheduled, late});
-            e.ringing = true;
-            e.next.reset();  // re-armed on dismiss
+            e.ring_started = now;
+            e.snoozed = false;
+            e.next.reset();  // re-armed on dismiss/snooze
         } else {
             events.push_back({AlarmEvent::Kind::Missed, e.alarm.id, scheduled, late});
             finish(e, now);
@@ -94,9 +125,15 @@ std::vector<AlarmEvent> AlarmService::tick(TimePoint now) {
 
 void AlarmService::dismiss(int id, TimePoint now) {
     Entry* e = entry(id);
-    if (e == nullptr || !e->ringing) return;
-    e->ringing = false;
+    if (e == nullptr || !(e->ring_started || e->snoozed)) return;
     finish(*e, now);
+}
+
+void AlarmService::snooze(int id, TimePoint now) {
+    Entry* e = entry(id);
+    if (e == nullptr || !e->ring_started) return;
+    e->auto_snoozes = 0;  // a human responded
+    snooze_entry(*e, now);
 }
 
 AlarmService::Entry* AlarmService::entry(int id) {
@@ -110,18 +147,22 @@ const AlarmService::Entry* AlarmService::entry(int id) const {
     return const_cast<AlarmService*>(this)->entry(id);
 }
 
-void AlarmService::arm(Entry& e, TimePoint now) {
-    if (!e.alarm.enabled) {
-        e.next.reset();
-        return;
-    }
-    e.next = next_occurrence(e.alarm.time, now, tz_);
+void AlarmService::arm(Entry& e, TimePoint from) {
+    e.next = e.alarm.enabled ? std::optional{next_occurrence(e.alarm.time, from, tz_, e.alarm.days)} : std::nullopt;
 }
 
-void AlarmService::finish(Entry& e, TimePoint /*now*/) {
-    // One-shot alarm: done after it fires (or is missed).
-    e.alarm.enabled = false;
-    e.next.reset();
+void AlarmService::finish(Entry& e, TimePoint now) {
+    e.ring_started.reset();
+    e.snoozed = false;
+    e.auto_snoozes = 0;
+    if (!e.alarm.repeats()) e.alarm.enabled = false;  // one-shot: consumed
+    arm(e, now);
+}
+
+void AlarmService::snooze_entry(Entry& e, TimePoint now) {
+    e.ring_started.reset();
+    e.snoozed = true;
+    e.next = now + std::chrono::minutes{std::max(1, e.alarm.snooze_minutes)};
 }
 
 }  // namespace ac
