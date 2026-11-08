@@ -2,6 +2,7 @@
 
 #include "app/big_digits.hpp"
 #include "core/days.hpp"
+#include "core/sleep_cycles.hpp"
 #include "core/time_format.hpp"
 
 #include <ftxui/component/component.hpp>
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <charconv>
 #include <condition_variable>
 #include <deque>
@@ -27,7 +29,7 @@ using namespace ftxui;
 using namespace std::chrono_literals;
 
 constexpr std::array<const char*, 7> kDayNames{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"};
-constexpr std::size_t kMaxNotices = 4;
+constexpr std::size_t kMaxNotices = 6;
 
 // Checkbox index (Mon-first) -> std::chrono::weekday encoding (Sun = 0).
 std::chrono::weekday ui_weekday(std::size_t i) { return std::chrono::weekday{static_cast<unsigned>((i + 1) % 7)}; }
@@ -44,6 +46,7 @@ struct EditForm {
     int id = 0;  // 0 = new alarm
     std::string time, label, snooze, fade, sound;
     std::array<bool, 7> days{};
+    bool math = false;
     std::string error;
 
     void load(const Alarm& a) {
@@ -54,6 +57,7 @@ struct EditForm {
         fade = std::to_string(a.fade_in_seconds);
         sound = a.sound;
         for (std::size_t i = 0; i < days.size(); ++i) days[i] = a.days.contains(ui_weekday(i));
+        math = a.challenge == ChallengeKind::Math;
         error.clear();
     }
 
@@ -75,6 +79,7 @@ struct EditForm {
         for (std::size_t i = 0; i < days.size(); ++i) {
             if (days[i]) a.days.add(ui_weekday(i));
         }
+        a.challenge = math ? ChallengeKind::Math : ChallengeKind::None;
         a.enabled = true;  // editing an alarm implies you want it on
         return a;
     }
@@ -218,7 +223,7 @@ private:
             text(a.enabled ? " [on]  " : " [off] ") | (a.enabled ? color(Color::GreenLight) : Decorator(dim)),
             text(format_time_of_day(a.time, fmt())) | bold | size(WIDTH, EQUAL, 10),
             text(format_days(a.days)) | size(WIDTH, EQUAL, 22),
-            text(a.label) | flex,
+            text(a.label + (a.challenge == ChallengeKind::Math ? " [math]" : "")) | flex,
             text(when + " ") | dim,
         });
         if (!a.enabled) row = row | dim;
@@ -246,7 +251,7 @@ private:
                            key_hint("y", "yes"), key_hint("any key", "no")});
         } else {
             footer = hbox({key_hint("a", "add"), key_hint("e", "edit"), key_hint("space", "on/off"),
-                           key_hint("d", "delete"), key_hint("t", "12/24h"), key_hint("q", "quit")});
+                           key_hint("d", "delete"), key_hint("t", "12/24h"), key_hint("b", "bedtime"), key_hint("q", "quit")});
         }
 
         return vbox({
@@ -267,13 +272,18 @@ private:
         const bool flash = session_.now().time_since_epoch().count() % 2 == 0;
         auto title = text("  ALARM  ") | bold | (flash ? bgcolor(Color::Red) : bgcolor(Color::DarkRed)) |
                      color(Color::White);
-        return vbox({
-                   title | hcenter,
-                   text(""),
-                   text(what) | bold | hcenter,
-                   text(""),
-                   hbox({key_hint("s", "snooze"), key_hint("Enter", "stop")}) | hcenter,
-               }) |
+        Elements body{title | hcenter, text(""), text(what) | bold | hcenter, text("")};
+        if (const auto* p = session_.challenge()) {
+            body.push_back(text("Solve to stop:  " + p->question) | hcenter);
+            body.push_back(hbox({text("> "), text(answer_) | bold, text("_") | blink}) | hcenter);
+            if (!challenge_msg_.empty()) body.push_back(text(challenge_msg_) | color(Color::Yellow) | hcenter);
+            body.push_back(text(""));
+            body.push_back(hbox({key_hint("0-9", "answer"), key_hint("Enter", "submit"), key_hint("s", "snooze")}) |
+                           hcenter);
+        } else {
+            body.push_back(hbox({key_hint("s", "snooze"), key_hint("Enter", "stop")}) | hcenter);
+        }
+        return vbox(body) |
                borderDouble | size(WIDTH, GREATER_THAN, 40) | clear_under | center;
     }
 
@@ -292,12 +302,13 @@ private:
         Components day_boxes;
         for (std::size_t i = 0; i < form_.days.size(); ++i) day_boxes.push_back(Checkbox(kDayNames[i], &form_.days[i]));
         auto days = Container::Horizontal(day_boxes);
+        auto math_box = Checkbox("Solve a math problem to stop", &form_.math);
         auto save = Button(" Save ", [this] { save_form(); }, ButtonOption::Ascii());
         auto cancel = Button(" Cancel ", [this] { show_form_ = false; }, ButtonOption::Ascii());
         time_input_ = in_time;
 
         auto form_container = Container::Vertical(
-            {in_time, in_label, days, in_snooze, in_fade, in_sound, Container::Horizontal({save, cancel})});
+            {in_time, in_label, days, math_box, in_snooze, in_fade, in_sound, Container::Horizontal({save, cancel})});
 
         auto field = [](const char* name, const Component& c) {
             return hbox({text(name) | size(WIDTH, EQUAL, 12), c->Render() | flex});
@@ -311,6 +322,7 @@ private:
                               field("Label", in_label),
                               hbox({text("Repeat") | size(WIDTH, EQUAL, 12), hbox(day_els)}),
                               text("            (no days ticked = rings once)") | dim,
+                              hbox({text("Challenge") | size(WIDTH, EQUAL, 12), math_box->Render()}),
                               field("Snooze min", in_snooze),
                               field("Fade-in s", in_fade),
                               field("Sound file", in_sound),
@@ -337,6 +349,10 @@ private:
             if (e == Event::Character('s') || e == Event::Character('S')) {
                 session_.snooze();
                 push({{Notice::Level::Info, "Snoozed."}});
+                answer_.clear();
+                challenge_msg_.clear();
+            } else if (session_.challenge()) {
+                on_challenge_key(e);
             } else if (e == Event::Return || e == Event::Character('d') || e == Event::Character(' ')) {
                 session_.dismiss();
                 push({{Notice::Level::Info, "Alarm stopped."}});
@@ -380,6 +396,8 @@ private:
             refresh();
         } else if (e == Event::Character('d') || e == Event::Delete) {
             confirm_delete_ = current() != nullptr;
+        } else if (e == Event::Character('b')) {
+            show_bedtimes();
         } else if (e == Event::Character('t')) {
             session_.set_hour_format(fmt() == HourFormat::H24 ? HourFormat::H12 : HourFormat::H24);
         } else if (e == Event::Character('q') || e == Event::Escape) {
@@ -388,6 +406,44 @@ private:
             return false;
         }
         return true;
+    }
+
+    void on_challenge_key(const Event& e) {
+        if (e.is_character() && e.character().size() == 1 && std::isdigit(static_cast<unsigned char>(e.character()[0]))) {
+            if (answer_.size() < 6) answer_ += e.character();
+        } else if (e == Event::Character('-') && answer_.empty()) {
+            answer_ = "-";
+        } else if (e == Event::Backspace && !answer_.empty()) {
+            answer_.pop_back();
+        } else if (e == Event::Return && !answer_.empty()) {
+            const auto result = session_.dismiss(parse_int(answer_, -1'000'000, 1'000'000));
+            answer_.clear();
+            if (result == AlarmSession::DismissResult::Dismissed) {
+                challenge_msg_.clear();
+                push({{Notice::Level::Info, "Correct - alarm stopped. Good morning!"}});
+            } else {
+                challenge_msg_ = "Not quite - here's a new one.";
+            }
+        }
+    }
+
+    void show_bedtimes() {
+        const auto now = session_.now();
+        std::vector<SleepOption> options;
+        std::string header;
+        if (auto next = session_.service().next_due()) {
+            const auto wake = session_.time_zone().to_local(next->second).time_of_day();
+            options = bedtimes_for(wake);
+            header = "Bedtimes for " + session_.describe(next->first) + " (90-min cycles):";
+        } else {
+            options = wake_times_for(session_.time_zone().to_local(now).time_of_day());
+            header = "If you sleep now, wake at (90-min cycles):";
+        }
+        std::string line;
+        for (const auto& o : options) {
+            line += format_time_of_day(o.time, fmt()) + " (" + format_duration(o.sleep) + ")   ";
+        }
+        push({{Notice::Level::Info, header}, {Notice::Level::Info, line}});
     }
 
     void open_form(const Alarm& a) {
@@ -423,6 +479,8 @@ private:
     EditForm form_;
     Alarm form_base_;
     Component time_input_;
+    std::string answer_;
+    std::string challenge_msg_;
     std::deque<Notice> notices_;
 };
 
