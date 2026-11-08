@@ -8,6 +8,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(ALARM_BUILD_TESTS "Build unit tests" ON)
 
+# Ship self-contained binaries: no compiler runtime DLLs needed next to the .exe.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+if(MINGW)
+  string(APPEND CMAKE_EXE_LINKER_FLAGS " -static")
+endif()
+
 include(cmake/Dependencies.cmake)
 
 # Warnings for our own code only (third-party targets are left alone).
@@ -26,6 +32,7 @@ add_library(alarm_core STATIC
   src/core/duration.cpp
   src/core/saved_state.cpp
   src/core/schedule.cpp
+  src/core/sleep_cycles.cpp
   src/core/sleep_cycles.cpp
   src/core/sleep_cycles.cpp
   src/core/time_format.cpp
