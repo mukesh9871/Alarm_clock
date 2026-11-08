@@ -7,11 +7,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(ALARM_BUILD_TESTS "Build unit tests" ON)
+option(ALARM_CLANG_TIDY "Run clang-tidy on the project's own code while compiling" OFF)
+set(ALARM_SANITIZE "" CACHE STRING "Sanitizers to enable (GCC/Clang), e.g. address,undefined")
 
 # Ship self-contained binaries: no compiler runtime DLLs needed next to the .exe.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 if(MINGW)
   string(APPEND CMAKE_EXE_LINKER_FLAGS " -static")
+endif()
+
+if(ALARM_SANITIZE)
+  add_compile_options(-fsanitize=${ALARM_SANITIZE} -fno-omit-frame-pointer -fno-sanitize-recover=all)
+  add_link_options(-fsanitize=${ALARM_SANITIZE})
 endif()
 
 include(cmake/Dependencies.cmake)
@@ -32,8 +39,6 @@ add_library(alarm_core STATIC
   src/core/duration.cpp
   src/core/saved_state.cpp
   src/core/schedule.cpp
-  src/core/sleep_cycles.cpp
-  src/core/sleep_cycles.cpp
   src/core/sleep_cycles.cpp
   src/core/time_format.cpp
   src/core/time_zone.cpp
@@ -72,8 +77,26 @@ add_custom_command(TARGET alarm_clock POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           ${CMAKE_SOURCE_DIR}/assets/sounds $<TARGET_FILE_DIR:alarm_clock>/sounds)
 
+if(ALARM_CLANG_TIDY)
+  find_program(CLANG_TIDY_EXE NAMES clang-tidy REQUIRED)
+  set_target_properties(alarm_core alarm_platform alarm_app alarm_clock PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
+endif()
+
+# ---- Install / package:  cmake --build build && cpack --config build/CPackConfig.cmake ----
 install(TARGETS alarm_clock RUNTIME DESTINATION .)
 install(DIRECTORY assets/sounds DESTINATION .)
+install(FILES README.md LICENSE DESTINATION .)
+
+set(CPACK_GENERATOR ZIP)
+set(CPACK_PACKAGE_NAME alarm_clock)
+set(CPACK_PACKAGE_VENDOR "Mukesh Kumar")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Reliable terminal alarm clock")
+if(NOT ALARM_PACKAGE_SUFFIX)
+  set(ALARM_PACKAGE_SUFFIX "${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+set(CPACK_PACKAGE_FILE_NAME "alarm_clock-${PROJECT_VERSION}-${ALARM_PACKAGE_SUFFIX}")
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
+include(CPack)
 
 if(ALARM_BUILD_TESTS)
   enable_testing()
