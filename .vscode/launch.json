@@ -2,32 +2,18 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "type": "node",
-      "request": "launch",
-      "name": "Launch Program",
-      "program": "${workspaceFolder}/first.exe",
-      "stopOnEntry": true,
-      "osx": {
-        "stopOnEntry": true
-      }
-    },
-    {
-      "name": "C/C++ Runner: Debug Session",
+      "name": "Debug alarm_clock",
       "type": "cppdbg",
       "request": "launch",
+      "program": "${workspaceFolder}/build/alarm_clock.exe",
       "args": [],
-      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/build",
       "externalConsole": true,
-      "cwd": "d:/myGitHubProjects/Alarm_clock",
-      "program": "d:/myGitHubProjects/Alarm_clock/build/Debug/outDebug",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
+      "preLaunchTask": "CMake: build",
       "setupCommands": [
-        {
-          "description": "Enable pretty-printing for gdb",
-          "text": "-enable-pretty-printing",
-          "ignoreFailures": true
-        }
+        { "description": "Enable pretty-printing for gdb", "text": "-enable-pretty-printing", "ignoreFailures": true }
       ]
     }
   ]
