@@ -54,7 +54,8 @@ public:
     // The problem to solve before the ringing alarm(s) can be stopped, if any.
     [[nodiscard]] const MathProblem* challenge() const { return problem_ ? &*problem_ : nullptr; }
 
-    // Edits from the UI; each is saved immediately.
+    // Edits from the UI. Each first picks up changes made from another process, so
+    // it can't overwrite them, and is saved immediately.
     int save_alarm(Alarm alarm);
     bool remove_alarm(int id);
     bool toggle_alarm(int id);
@@ -72,6 +73,7 @@ public:
 private:
     std::vector<Notice> to_notices(const std::vector<AlarmEvent>& events, bool at_startup);
     void apply_settings();
+    void reload_if_changed();
     void persist();
     void persist_if_changed();
     void stop_audio_if_quiet();
@@ -93,6 +95,7 @@ private:
     std::optional<MathProblem> problem_;
     std::uint32_t problem_counter_ = 0;
     std::string reported_save_error_;
+    std::vector<Notice> queued_notices_;  // from reloads outside tick(), shown on the next tick
 };
 
 }  // namespace ac

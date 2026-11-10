@@ -47,20 +47,30 @@ std::vector<Notice> AlarmSession::start() {
     return notices;
 }
 
-std::vector<Notice> AlarmSession::tick() {
-    std::vector<Notice> notices;
-    const TimePoint now = clock_.now();
-
-    if (file_.changed_on_disk()) {
-        auto loaded = file_.load();
-        if (loaded.warning) notices.push_back({Notice::Level::Warning, *loaded.warning});
-        settings_ = loaded.state.settings;
-        apply_settings();
-        service_.sync(loaded.state.alarms, now);
-        last_saved_ = loaded.state;
-        last_saved_.alarms = service_.alarms();
-        notices.push_back({Notice::Level::Info, "Alarm list reloaded (changed outside this window)."});
+void AlarmSession::reload_if_changed() {
+    if (!file_.changed_on_disk()) return;
+    // The file may be caught half-written, or hand-edited into a broken state: then keep the
+    // alarms this session has rather than dropping them all, and leave the file alone.
+    auto loaded = file_.load(StateFile::OnCorrupt::Leave);
+    if (loaded.unreadable) {
+        if (loaded.warning) queued_notices_.push_back({Notice::Level::Warning, *loaded.warning});
+        return;
     }
+    settings_ = loaded.state.settings;
+    apply_settings();
+    // Runtime state (ringing, snoozed) is ours; the file's copy of it is what we last wrote.
+    service_.sync(loaded.state.alarms, clock_.now());
+    last_saved_ = loaded.state;
+    last_saved_.alarms = service_.alarms();
+    stop_audio_if_quiet();  // the ringing alarm may have been edited or removed
+    queued_notices_.push_back({Notice::Level::Info, "Alarm list reloaded (changed outside this window)."});
+}
+
+std::vector<Notice> AlarmSession::tick() {
+    reload_if_changed();
+    std::vector<Notice> notices = std::move(queued_notices_);
+    queued_notices_.clear();
+    const TimePoint now = clock_.now();
 
     auto events = to_notices(service_.tick(now), /*at_startup=*/false);
     notices.insert(notices.end(), events.begin(), events.end());
@@ -84,12 +94,14 @@ void AlarmSession::shutdown() {
 }
 
 void AlarmSession::snooze() {
+    reload_if_changed();
     const TimePoint now = clock_.now();
     for (int id : service_.ringing()) service_.snooze(id, now);
     stop_audio_if_quiet();
 }
 
 AlarmSession::DismissResult AlarmSession::dismiss(std::optional<int> answer) {
+    reload_if_changed();
     if (service_.ringing().empty()) return DismissResult::NotRinging;
     if (problem_) {
         if (!answer) return DismissResult::NeedsAnswer;
@@ -111,6 +123,7 @@ void AlarmSession::new_problem() {
 }
 
 int AlarmSession::save_alarm(Alarm alarm) {
+    reload_if_changed();
     const TimePoint now = clock_.now();
     if (alarm.id <= 0) {
         int max_id = 0;
@@ -125,6 +138,7 @@ int AlarmSession::save_alarm(Alarm alarm) {
 }
 
 bool AlarmSession::remove_alarm(int id) {
+    reload_if_changed();
     const bool ok = service_.remove(id);
     stop_audio_if_quiet();
     persist();
@@ -132,6 +146,7 @@ bool AlarmSession::remove_alarm(int id) {
 }
 
 bool AlarmSession::toggle_alarm(int id) {
+    reload_if_changed();
     const Alarm* a = service_.find(id);
     if (a == nullptr) return false;
     Alarm copy = *a;
@@ -141,6 +156,7 @@ bool AlarmSession::toggle_alarm(int id) {
 }
 
 void AlarmSession::set_hour_format(HourFormat fmt) {
+    reload_if_changed();
     settings_.hour_format = fmt;
     persist();
 }
