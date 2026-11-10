@@ -27,4 +27,13 @@ struct Alarm {
     friend bool operator==(const Alarm&, const Alarm&) = default;
 };
 
+// An occurrence that is still outstanding: snoozed, or ringing when the app closed.
+// Saved so a restart resumes it instead of losing it.
+struct PendingRing {
+    int alarm_id = 0;
+    TimePoint due{};
+
+    friend bool operator==(const PendingRing&, const PendingRing&) = default;
+};
+
 }  // namespace ac

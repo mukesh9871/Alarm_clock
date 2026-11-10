@@ -26,6 +26,7 @@ struct SavedState {
     std::vector<Alarm> alarms{};
     // Last moment the app was known to be running; used to detect alarms missed while closed.
     std::optional<TimePoint> last_seen{};
+    std::vector<PendingRing> pending{};
 
     friend bool operator==(const SavedState&, const SavedState&) = default;
 };

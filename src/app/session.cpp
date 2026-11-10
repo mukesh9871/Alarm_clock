@@ -39,6 +39,7 @@ std::vector<Notice> AlarmSession::start() {
         const TimePoint from = std::min(now, std::max(last_seen, a.updated_at));
         service_.upsert(a, from);
     }
+    for (const PendingRing& p : loaded.state.pending) service_.restore_pending(p);
 
     auto events = to_notices(service_.tick(now), /*at_startup=*/true);
     notices.insert(notices.end(), events.begin(), events.end());
@@ -62,6 +63,7 @@ void AlarmSession::reload_if_changed() {
     service_.sync(loaded.state.alarms, clock_.now());
     last_saved_ = loaded.state;
     last_saved_.alarms = service_.alarms();
+    last_saved_.pending = service_.pending();
     stop_audio_if_quiet();  // the ringing alarm may have been edited or removed
     queued_notices_.push_back({Notice::Level::Info, "Alarm list reloaded (changed outside this window)."});
 }
@@ -207,7 +209,8 @@ void AlarmSession::apply_settings() {
 }
 
 void AlarmSession::persist() {
-    SavedState state{.settings = settings_, .alarms = service_.alarms(), .last_seen = clock_.now()};
+    SavedState state{
+        .settings = settings_, .alarms = service_.alarms(), .last_seen = clock_.now(), .pending = service_.pending()};
     try {
         file_.save(state);
         save_error_.reset();
@@ -220,7 +223,10 @@ void AlarmSession::persist() {
 
 void AlarmSession::persist_if_changed() {
     const bool stale = !last_saved_.last_seen || clock_.now() - *last_saved_.last_seen >= kLastSeenInterval;
-    if (stale || last_saved_.settings != settings_ || last_saved_.alarms != service_.alarms()) persist();
+    if (stale || last_saved_.settings != settings_ || last_saved_.alarms != service_.alarms() ||
+        last_saved_.pending != service_.pending()) {
+        persist();
+    }
 }
 
 void AlarmSession::stop_audio_if_quiet() {

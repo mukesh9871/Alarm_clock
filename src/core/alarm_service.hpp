@@ -51,6 +51,13 @@ public:
     [[nodiscard]] std::vector<int> ringing() const;
     [[nodiscard]] bool is_snoozed(int id) const;
 
+    // Snoozed or ringing occurrences, to save across restarts. A ringing alarm is due
+    // when it started ringing.
+    [[nodiscard]] std::vector<PendingRing> pending() const;
+    // Resumes a saved occurrence: the (enabled) alarm fires at `due` as a snooze would.
+    // Ignored for unknown or disabled alarms.
+    void restore_pending(const PendingRing& p);
+
     // Advances time. Fires every alarm whose scheduled time is <= now.
     std::vector<AlarmEvent> tick(TimePoint now);
 

@@ -90,6 +90,27 @@ bool AlarmService::is_snoozed(int id) const {
     return e && e->snoozed;
 }
 
+std::vector<PendingRing> AlarmService::pending() const {
+    std::vector<PendingRing> out;
+    for (const auto& e : entries_) {
+        if (e.ring_started) {
+            out.push_back({e.alarm.id, *e.ring_started});
+        } else if (e.snoozed && e.next) {
+            out.push_back({e.alarm.id, *e.next});
+        }
+    }
+    std::sort(out.begin(), out.end(), [](const PendingRing& a, const PendingRing& b) { return a.alarm_id < b.alarm_id; });
+    return out;
+}
+
+void AlarmService::restore_pending(const PendingRing& p) {
+    Entry* e = entry(p.alarm_id);
+    if (e == nullptr || !e->alarm.enabled) return;
+    e->ring_started.reset();
+    e->snoozed = true;
+    e->next = p.due;
+}
+
 std::vector<AlarmEvent> AlarmService::tick(TimePoint now) {
     std::vector<AlarmEvent> events;
     for (auto& e : entries_) {

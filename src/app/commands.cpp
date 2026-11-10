@@ -81,12 +81,21 @@ int run_command(const cli::Command& cmd, StateFile& file, const Clock& clock, co
         return 1;
     };
     auto save = [&] { file.save(state); };
+    // A changed alarm starts fresh: forget any snooze the running clock saved for it.
+    auto forget_pending = [&](int id) {
+        std::erase_if(state.pending, [id](const PendingRing& p) { return p.alarm_id == id; });
+    };
 
     return std::visit(
         [&](const auto& c) -> int {
             using T = std::decay_t<decltype(c)>;
             if constexpr (std::is_same_v<T, cli::List>) {
-                print_alarms(state.alarms, state.settings.hour_format, now, tz, out);
+                print_alarms(state.alarms, state.settings.hour_format, now, tz, out, [&](const Alarm& a) {
+                    for (const PendingRing& p : state.pending) {
+                        if (p.alarm_id == a.id && a.enabled) return NextRing{p.due, true};
+                    }
+                    return NextRing{a.enabled ? std::optional{next_occurrence(a.time, now, tz, a.days)} : std::nullopt};
+                });
                 return 0;
             } else if constexpr (std::is_same_v<T, cli::Add>) {
                 Alarm a;
@@ -105,12 +114,14 @@ int run_command(const cli::Command& cmd, StateFile& file, const Clock& clock, co
                 if (a == nullptr) return not_found(c.id);
                 apply_options(c.options, *a);
                 a->updated_at = now;
+                forget_pending(c.id);
                 save();
                 out << "Updated alarm " << c.id << ".\n";
                 return 0;
             } else if constexpr (std::is_same_v<T, cli::Remove>) {
                 if (find(c.id) == nullptr) return not_found(c.id);
                 std::erase_if(state.alarms, [&](const Alarm& a) { return a.id == c.id; });
+                forget_pending(c.id);
                 save();
                 out << "Removed alarm " << c.id << ".\n";
                 return 0;
@@ -119,6 +130,7 @@ int run_command(const cli::Command& cmd, StateFile& file, const Clock& clock, co
                 if (a == nullptr) return not_found(c.id);
                 a->enabled = c.enabled;
                 a->updated_at = now;
+                forget_pending(c.id);
                 save();
                 out << "Alarm " << c.id << (c.enabled ? " enabled.\n" : " disabled.\n");
                 return 0;

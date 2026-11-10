@@ -74,6 +74,13 @@ std::string to_json(const SavedState& state) {
         {"alarms", alarms},
     };
     if (state.last_seen) j["last_seen_unix"] = state.last_seen->time_since_epoch().count();
+    if (!state.pending.empty()) {
+        json pending = json::array();
+        for (const auto& p : state.pending) {
+            pending.push_back({{"id", p.alarm_id}, {"due_unix", p.due.time_since_epoch().count()}});
+        }
+        j["pending"] = pending;
+    }
     return j.dump(2) + "\n";
 }
 
@@ -102,6 +109,12 @@ SavedState state_from_json(std::string_view text) {
 
         if (const auto it = j.find("last_seen_unix"); it != j.end()) {
             state.last_seen = TimePoint{std::chrono::seconds{it->get<std::int64_t>()}};
+        }
+        for (const auto& item : j.value("pending", json::array())) {
+            const int id = item.at("id").get<int>();
+            // A pending ring for an alarm that no longer exists is harmless; drop it.
+            if (ids.count(id) == 0) continue;
+            state.pending.push_back({id, TimePoint{std::chrono::seconds{item.at("due_unix").get<std::int64_t>()}}});
         }
         return state;
     } catch (const json::exception& e) {

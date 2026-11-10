@@ -39,7 +39,7 @@ public:
     static constexpr std::chrono::seconds kWakeLead{60};
 
     // Loads alarms. Alarms that came due while the app was closed are reported as missed
-    // (or rung, if within the grace period).
+    // (or rung, if within the grace period). Snoozes saved by a previous run resume.
     std::vector<Notice> start();
     std::vector<Notice> tick();
     void shutdown();
