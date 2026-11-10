@@ -6,40 +6,12 @@
 #include "platform/terminal.hpp"
 
 #include <charconv>
-#include <csignal>
 #include <iostream>
 #include <string>
 
 namespace ac {
 
 namespace {
-
-// Set by Ctrl+C / SIGTERM so the loop can shut down cleanly (save, cancel the wake timer).
-volatile std::sig_atomic_t g_stop_requested = 0;
-
-extern "C" void on_stop_signal(int /*sig*/) { g_stop_requested = 1; }
-
-// Installs the stop handlers for the lifetime of the console loop.
-class StopSignals {
-public:
-    StopSignals() {
-        g_stop_requested = 0;
-        prev_int_ = std::signal(SIGINT, on_stop_signal);
-        prev_term_ = std::signal(SIGTERM, on_stop_signal);
-    }
-    ~StopSignals() {
-        std::signal(SIGINT, prev_int_);
-        std::signal(SIGTERM, prev_term_);
-    }
-    StopSignals(const StopSignals&) = delete;
-    StopSignals& operator=(const StopSignals&) = delete;
-
-    [[nodiscard]] static bool requested() { return g_stop_requested != 0; }
-
-private:
-    void (*prev_int_)(int) = SIG_DFL;
-    void (*prev_term_)(int) = SIG_DFL;
-};
 
 void print_notices(const AlarmSession& s, const std::vector<Notice>& notices) {
     for (const auto& n : notices) {
@@ -92,11 +64,12 @@ int run_console(AlarmSession& session) {
     std::cout << "Commands: [Enter] stop alarm  [s] snooze  [l] list alarms  [q] quit\n"
                  "Manage alarms from another terminal with 'alarm_clock add/edit/remove' - changes load automatically.\n\n";
 
-    const StopSignals signals;
-    LineInput input(stdin_is_terminal());
+    const StopRequests stop;  // Ctrl+C or closing the window still saves and cancels the wake timer
+    const bool typed_input = stdin_is_terminal();
+    LineInput input(typed_input);
     bool reported_closed = false;
     std::size_t last_len = 0;
-    for (bool running = true; running && !StopSignals::requested();) {
+    for (bool running = true; running && !StopRequests::requested();) {
         print_notices(session, session.tick());
 
         std::string line = status_line(session);
@@ -106,11 +79,12 @@ int run_console(AlarmSession& session) {
         std::cout << '\r' << line << std::flush;
 
         auto cmd = input.pop_for(LineInput::until_next_second());
-        if (input.closed() && !reported_closed) {
+        if (!typed_input && input.closed() && !reported_closed) {
             reported_closed = true;
             std::cout << "\nNo more input - the clock keeps running. Press Ctrl+C to stop it.\n";
         }
         if (!cmd) continue;
+        if (StopRequests::requested()) break;
         const bool ringing = !session.service().ringing().empty();
 
         if (*cmd == "q") {
@@ -148,6 +122,7 @@ int run_console(AlarmSession& session) {
     }
 
     session.shutdown();
+    StopRequests::cleanup_done();
     std::cout << "\nBye.\n";
     return 0;
 }
