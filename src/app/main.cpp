@@ -10,6 +10,7 @@
 #include "platform/paths.hpp"
 #include "platform/power.hpp"
 #include "platform/state_file.hpp"
+#include "platform/terminal.hpp"
 
 #include <exception>
 #include <iostream>
@@ -21,11 +22,6 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#include <io.h>
-#define AC_ISATTY(fd) _isatty(fd)
-#else
-#include <unistd.h>
-#define AC_ISATTY(fd) isatty(fd)
 #endif
 
 #ifndef ALARM_CLOCK_VERSION
@@ -68,7 +64,7 @@ int main(int argc, char** argv) {
         ac::AlarmSession session(file, clock, tz, *audio, ac::resolve_sound, power.get());
 
         // The full-screen UI needs a real terminal; fall back to plain output when piped.
-        const bool interactive = AC_ISATTY(0) && AC_ISATTY(1);
+        const bool interactive = ac::stdin_is_terminal() && ac::stdout_is_terminal();
         if (std::get<ac::cli::Run>(inv.command).plain || !interactive) return ac::run_console(session);
         return ac::run_tui(session);
     } catch (const ac::cli::UsageError& e) {

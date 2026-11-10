@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -14,23 +15,30 @@
 namespace ac {
 
 // Reads stdin lines on a background thread so a UI loop can wait with a timeout.
-// "q"/"Q" or end of input is delivered as "q".
+// "q"/"Q" is delivered as "q".
+//
+// End of input means "quit" only when typed at a terminal (Ctrl+D / Ctrl+Z). When stdin is
+// a pipe, a file or /dev/null (scheduled tasks, nohup), it just means no more input: the
+// caller keeps running and can check closed().
 //
 // A thread blocked in std::getline can't be interrupted portably, so the reader owns its
 // state through a shared_ptr and is detached on destruction; it ends with the process.
 class LineInput {
 public:
-    LineInput() : state_(std::make_shared<State>()) {
-        std::thread([state = state_] {
+    explicit LineInput(bool eof_quits) : state_(std::make_shared<State>()) {
+        std::thread([state = state_, eof_quits] {
             std::string line;
             while (std::getline(std::cin, line)) {
-                const bool quit = line == "q" || line == "Q";
-                state->push(quit ? "q" : std::move(line));
-                if (quit) return;
+                // Keep reading after "q": the UI may refuse to quit (e.g. while an alarm rings).
+                state->push(line == "Q" ? "q" : std::move(line));
             }
-            state->push("q");
+            state->closed = true;
+            if (eof_quits) state->push("q");
         }).detach();
     }
+
+    // True once stdin has reached end of input.
+    [[nodiscard]] bool closed() const { return state_->closed; }
 
     std::optional<std::string> pop_for(std::chrono::milliseconds timeout) {
         std::unique_lock lock(state_->mutex);
@@ -52,6 +60,7 @@ private:
         std::mutex mutex;
         std::condition_variable cv;
         std::deque<std::string> lines;
+        std::atomic<bool> closed{false};
 
         void push(std::string line) {
             {

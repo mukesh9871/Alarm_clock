@@ -52,6 +52,7 @@ add_library(alarm_platform STATIC
   src/platform/paths.cpp
   src/platform/power.cpp
   src/platform/state_file.cpp
+  src/platform/terminal.cpp
 )
 target_include_directories(alarm_platform PUBLIC src)
 target_link_libraries(alarm_platform PUBLIC alarm_core PRIVATE alarm_warnings miniaudio)

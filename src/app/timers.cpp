@@ -2,6 +2,7 @@
 
 #include "app/line_input.hpp"
 #include "core/duration.hpp"
+#include "platform/terminal.hpp"
 
 #include <iostream>
 #include <vector>
@@ -26,7 +27,7 @@ int run_timer(seconds duration, const std::string& label, AudioPlayer& audio, co
 
     // steady_clock: a countdown must not jump if the wall clock is changed.
     const auto end = steady_clock::now() + duration;
-    LineInput input;
+    LineInput input(stdin_is_terminal());
     std::size_t last_len = 0;
 
     for (;;) {
@@ -53,7 +54,7 @@ int run_stopwatch() {
     const auto start = steady_clock::now();
     auto lap_start = start;
     std::vector<milliseconds> laps;
-    LineInput input;
+    LineInput input(stdin_is_terminal());
     std::size_t last_len = 0;
 
     for (;;) {
