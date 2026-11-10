@@ -127,12 +127,7 @@ void AlarmSession::new_problem() {
 int AlarmSession::save_alarm(Alarm alarm) {
     reload_if_changed();
     const TimePoint now = clock_.now();
-    if (alarm.id <= 0) {
-        int max_id = 0;
-        for (const auto& a : service_.alarms()) max_id = std::max(max_id, a.id);
-        alarm.id = max_id + 1;
-    }
-    alarm.updated_at = now;
+    alarm.updated_at = now;  // a new alarm (id 0) is numbered by the service
     const int id = service_.upsert(std::move(alarm), now);
     stop_audio_if_quiet();
     persist();

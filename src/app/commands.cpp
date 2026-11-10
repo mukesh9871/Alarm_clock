@@ -99,8 +99,7 @@ int run_command(const cli::Command& cmd, StateFile& file, const Clock& clock, co
                 return 0;
             } else if constexpr (std::is_same_v<T, cli::Add>) {
                 Alarm a;
-                for (const auto& existing : state.alarms) a.id = std::max(a.id, existing.id);
-                a.id += 1;
+                a.id = next_alarm_id(state.alarms);
                 apply_options(c.options, a);
                 a.updated_at = now;
                 state.alarms.push_back(a);

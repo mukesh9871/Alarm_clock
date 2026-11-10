@@ -10,8 +10,7 @@ namespace ac {
 AlarmService::AlarmService(const TimeZone& tz, ServiceConfig config) : tz_(tz), config_(config) {}
 
 int AlarmService::upsert(Alarm alarm, TimePoint arm_from) {
-    if (alarm.id <= 0) alarm.id = next_id_;
-    next_id_ = std::max(next_id_, alarm.id + 1);
+    if (alarm.id <= 0) alarm.id = next_alarm_id(alarms());
 
     Entry* e = entry(alarm.id);
     if (e == nullptr) {

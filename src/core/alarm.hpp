@@ -4,7 +4,9 @@
 #include "core/days.hpp"
 #include "core/time_types.hpp"
 
+#include <algorithm>
 #include <string>
+#include <vector>
 
 namespace ac {
 
@@ -26,6 +28,14 @@ struct Alarm {
 
     friend bool operator==(const Alarm&, const Alarm&) = default;
 };
+
+// The id for a new alarm: one more than the highest in use. The CLI, the UI and the
+// service all number alarms this way, so ids match whichever of them adds one.
+[[nodiscard]] inline int next_alarm_id(const std::vector<Alarm>& alarms) {
+    int max_id = 0;
+    for (const Alarm& a : alarms) max_id = std::max(max_id, a.id);
+    return max_id + 1;
+}
 
 // True if an edit changes when the alarm rings (its time or repeat days). Such an edit
 // turns the alarm on: you don't reschedule an alarm you want to stay off.

@@ -35,7 +35,8 @@ public:
     explicit AlarmService(const TimeZone& tz, ServiceConfig config = {});
 
     // Adds (or, if the id exists, replaces) an alarm and arms it: it will fire at its
-    // first occurrence strictly after `arm_from`. Returns its id.
+    // first occurrence strictly after `arm_from`. An id <= 0 gets next_alarm_id().
+    // Returns its id.
     int upsert(Alarm alarm, TimePoint arm_from);
     bool remove(int id);
     bool set_enabled(int id, bool enabled, TimePoint now);
@@ -87,7 +88,6 @@ private:
     const TimeZone& tz_;
     ServiceConfig config_;
     std::vector<Entry> entries_;
-    int next_id_ = 1;
 };
 
 }  // namespace ac
