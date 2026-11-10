@@ -1,0 +1,55 @@
+#pragma once
+
+#include "core/challenge.hpp"
+#include "core/days.hpp"
+#include "core/time_types.hpp"
+
+#include <algorithm>
+#include <string>
+#include <vector>
+
+namespace ac {
+
+struct Alarm {
+    int id = 0;  // 0 = not yet assigned
+    TimeOfDay time{};
+    std::string label{};
+    bool enabled = true;
+    DaySet days{};            // empty = one-shot
+    int snooze_minutes = 9;
+    std::string sound{};      // empty = bundled default sound
+    int fade_in_seconds = 30; // volume ramps from silent to full over this long
+    ChallengeKind challenge = ChallengeKind::None;  // must be solved to stop (not to snooze)
+    // When the alarm was created or last edited. An alarm can't have been "missed"
+    // at a time before it existed, so arming never starts earlier than this.
+    TimePoint updated_at{};
+
+    [[nodiscard]] bool repeats() const { return !days.empty(); }
+
+    friend bool operator==(const Alarm&, const Alarm&) = default;
+};
+
+// The id for a new alarm: one more than the highest in use. The CLI, the UI and the
+// service all number alarms this way, so ids match whichever of them adds one.
+[[nodiscard]] inline int next_alarm_id(const std::vector<Alarm>& alarms) {
+    int max_id = 0;
+    for (const Alarm& a : alarms) max_id = std::max(max_id, a.id);
+    return max_id + 1;
+}
+
+// True if an edit changes when the alarm rings (its time or repeat days). Such an edit
+// turns the alarm on: you don't reschedule an alarm you want to stay off.
+[[nodiscard]] inline bool schedule_changed(const Alarm& before, const Alarm& after) {
+    return before.time != after.time || before.days != after.days;
+}
+
+// An occurrence that is still outstanding: snoozed, or ringing when the app closed.
+// Saved so a restart resumes it instead of losing it.
+struct PendingRing {
+    int alarm_id = 0;
+    TimePoint due{};
+
+    friend bool operator==(const PendingRing&, const PendingRing&) = default;
+};
+
+}  // namespace ac

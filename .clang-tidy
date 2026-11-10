@@ -1,0 +1,17 @@
+# Used by the CI clang-tidy job (cmake -DALARM_CLANG_TIDY=ON).
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
+  performance-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-emplace,
+  modernize-use-equals-default,
+  readability-container-size-empty,
+  readability-redundant-string-init,
+  cppcoreguidelines-slicing,
+  misc-unused-using-decls
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*/src/.*'
