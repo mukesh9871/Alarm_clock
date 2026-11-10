@@ -216,7 +216,7 @@ private:
         std::string when;
         if (const auto next = svc.next_fire(a.id)) {
             when = (svc.is_snoozed(a.id) ? "snoozed, " : "in ") + format_duration(*next - now);
-        } else if (std::find(svc.ringing().begin(), svc.ringing().end(), a.id) != svc.ringing().end()) {
+        } else if (const auto ringing = svc.ringing(); std::find(ringing.begin(), ringing.end(), a.id) != ringing.end()) {
             when = "RINGING";
         }
         Element row = hbox({
@@ -418,11 +418,20 @@ private:
         } else if (e == Event::Return && !answer_.empty()) {
             const auto result = session_.dismiss(parse_int(answer_, -1'000'000, 1'000'000));
             answer_.clear();
-            if (result == AlarmSession::DismissResult::Dismissed) {
-                challenge_msg_.clear();
-                push({{Notice::Level::Info, "Correct - alarm stopped. Good morning!"}});
-            } else {
-                challenge_msg_ = "Not quite - here's a new one.";
+            switch (result) {
+                case AlarmSession::DismissResult::Dismissed:
+                    challenge_msg_.clear();
+                    push({{Notice::Level::Info, "Correct - alarm stopped. Good morning!"}});
+                    break;
+                case AlarmSession::DismissResult::WrongAnswer:
+                    challenge_msg_ = "Not quite - here's a new one.";
+                    break;
+                case AlarmSession::DismissResult::NeedsAnswer:
+                    challenge_msg_ = "Type a number, then press Enter.";
+                    break;
+                case AlarmSession::DismissResult::NotRinging:
+                    challenge_msg_.clear();
+                    break;
             }
         }
     }
