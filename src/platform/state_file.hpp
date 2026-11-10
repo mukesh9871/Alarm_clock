@@ -15,13 +15,24 @@ public:
 
     struct LoadResult {
         SavedState state;
-        std::optional<std::string> warning;  // set if the file was unreadable and got backed up
+        std::optional<std::string> warning;  // set if the file was unreadable
+        bool unreadable = false;             // the file exists but couldn't be parsed
     };
 
-    // Missing file -> empty state. Corrupt file -> renamed to *.corrupt-<n> and empty state.
-    LoadResult load();
+    // What to do with a file that exists but can't be parsed.
+    enum class OnCorrupt {
+        // Move it to *.corrupt-<n> (or copy it there) and start from an empty state.
+        // If no backup can be made, saving is refused so the only copy isn't overwritten.
+        BackUp,
+        // Leave it alone and refuse to save over it until it changes (it may be mid-edit).
+        Leave,
+    };
 
-    // Atomic: writes a temp file then renames it over the target. Throws on I/O failure.
+    // Missing file -> empty state. Unreadable file -> empty state, unreadable = true.
+    LoadResult load(OnCorrupt on_corrupt = OnCorrupt::BackUp);
+
+    // Atomic: writes a uniquely named temp file then renames it over the target.
+    // Throws on I/O failure, or if the current file is unreadable and must not be overwritten.
     void save(const SavedState& state);
 
     // True if the file was modified by someone else since our last load/save.
@@ -34,6 +45,7 @@ private:
 
     std::filesystem::path path_;
     std::optional<std::filesystem::file_time_type> known_mtime_;
+    bool protect_existing_ = false;  // don't overwrite: unreadable and not backed up
 };
 
 }  // namespace ac
