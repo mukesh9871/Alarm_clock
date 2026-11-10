@@ -26,7 +26,8 @@ A reliable, cross-platform terminal alarm clock written in modern C++20.
 - **Math challenge** (optional, per alarm): solve a problem to stop the alarm, so you can't
   switch it off half-asleep; snooze still works
 - **Bedtime calculator** based on 90-minute sleep cycles, plus a **countdown timer** and **stopwatch**
-- **Snooze** (per-alarm length) and auto-snooze if nobody answers, giving up after 3 tries
+- **Snooze** (per-alarm length) and auto-snooze if nobody answers, giving up after 3 tries;
+  a snooze (or a ringing alarm) carries over if the app is closed and reopened
 - **Gentle wake-up**: the sound fades in; per-alarm custom WAV/MP3/FLAC
 - **Never silently misses an alarm**: rings even if a tick was skipped; tells you about alarms
   missed while the computer slept or the app was closed
@@ -59,7 +60,7 @@ ctest --test-dir build --output-on-failure   # run the unit tests
 alarm_clock add 6:45 --days weekdays --label "Gym"   # add alarms
 alarm_clock add 9:30am --days sat,sun --snooze 15 --fade 60
 alarm_clock list                                     # see them
-alarm_clock edit 2 --time 10:00                      # change one
+alarm_clock edit 2 --time 10:00                      # change one (a new time/days turns it on)
 alarm_clock disable 2 / enable 2 / remove 2
 alarm_clock add 6:00 --challenge math                 # must solve a sum to stop
 alarm_clock set hour-format 12
@@ -67,7 +68,8 @@ alarm_clock bedtime 6:45                             # when to sleep to wake bet
 alarm_clock timer 25m -l Pomodoro                    # countdown that rings
 alarm_clock stopwatch                                # Enter = lap, q = stop
 alarm_clock                                          # open the clock
-alarm_clock run --plain                              # simple line output (also used when piped)
+alarm_clock run --plain                              # simple line output (also used when piped;
+                                                     # keeps running without input, Ctrl+C stops)
 ```
 
 In the clock window:
@@ -85,8 +87,8 @@ In the clock window:
 | **While ringing, math challenge:** digits, Enter | answer the problem to stop |
 | **While ringing:** Enter / Space | stop |
 
-Other keys are ignored while an alarm rings, so you can't quit by accident. Run `alarm_clock help`
-for all command-line options.
+Other keys are ignored while an alarm rings, so you can't quit by accident (in `--plain` mode too).
+Run `alarm_clock help` for all command-line options.
 
 ### Waking from sleep (Windows)
 
@@ -100,7 +102,9 @@ reported when the computer resumes.
 Alarms are stored in `%APPDATA%\AlarmClock\alarms.json` (Windows),
 `~/Library/Application Support/AlarmClock/alarms.json` (macOS) or
 `~/.config/alarm-clock/alarms.json` (Linux). Use `--data FILE` to pick another file.
-If the file is ever corrupted it is set aside as `alarms.json.corrupt-N`, never overwritten.
+If the file is ever corrupted it is set aside as `alarms.json.corrupt-N`, never overwritten. If the
+file breaks while the clock is open, the clock keeps its alarms and leaves the file alone until it is
+fixed.
 
 ### Development options
 
