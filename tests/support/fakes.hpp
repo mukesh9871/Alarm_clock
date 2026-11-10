@@ -4,6 +4,7 @@
 #include "platform/audio_player.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <random>
 #include <string>
@@ -38,6 +39,14 @@ public:
     bool playing = false;
     bool succeed = true;
 };
+
+// Gives a file a distinct, later timestamp, as another process writing it would. Needed
+// because two writes within the filesystem's timestamp resolution can look identical.
+inline void bump_mtime(const std::filesystem::path& p) {
+    static int bumps = 0;
+    std::filesystem::last_write_time(
+        p, std::filesystem::file_time_type::clock::now() + std::chrono::seconds{5 + ++bumps});
+}
 
 // A unique temporary directory, deleted on destruction.
 class TempDir {

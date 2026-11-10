@@ -76,3 +76,18 @@ TEST_CASE("TUI ringing overlay shows the math challenge") {
     CHECK_THAT(s, ContainsSubstring("Solve to stop"));
     CHECK_THAT(s, ContainsSubstring(f.session.challenge()->question));
 }
+
+TEST_CASE("TUI lists the other alarms while one rings") {
+    Fixture f;
+    f.session.start();
+    f.session.save_alarm(Alarm{.time = {6, 1}, .label = "Wake up"});
+    f.session.save_alarm(Alarm{.time = {9, 30}, .label = "Brunch", .enabled = false});
+    f.clock.set(utc(2026, 1, 10, 6, 1));
+    f.session.tick();
+    // Rows without a next ring time look themselves up in the ringing list
+    // (this once compared iterators of two different copies of it).
+    const auto s = f.snap();
+    CHECK_THAT(s, ContainsSubstring("RINGING"));
+    CHECK_THAT(s, ContainsSubstring("[off]"));  // its label is behind the ringing overlay
+    CHECK_THAT(s, ContainsSubstring("09:30"));
+}

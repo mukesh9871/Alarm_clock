@@ -202,3 +202,60 @@ TEST_CASE("sync keeps unchanged alarms' runtime state and applies edits") {
     CHECK(svc.ringing().empty());
     CHECK(svc.alarms().size() == 2);
 }
+
+TEST_CASE("pending() lists snoozed and ringing alarms, and restore_pending resumes them") {
+    AlarmService svc(kUtc);
+    const auto t0 = utc(2026, 1, 10, 6, 0);
+    const int a = svc.upsert(Alarm{.time = {7, 0}, .snooze_minutes = 5}, t0);
+    const int b = svc.upsert(Alarm{.time = {7, 0}}, t0);
+    CHECK(svc.pending().empty());
+
+    svc.tick(utc(2026, 1, 10, 7, 0));
+    svc.snooze(a, utc(2026, 1, 10, 7, 1));
+    CHECK(svc.pending() == std::vector<PendingRing>{{a, utc(2026, 1, 10, 7, 6)}, {b, utc(2026, 1, 10, 7, 0)}});
+
+    // A fresh service (the app restarted) picks the occurrences back up.
+    AlarmService restarted(kUtc);
+    restarted.upsert(*svc.find(a), utc(2026, 1, 10, 7, 2));
+    restarted.upsert(*svc.find(b), utc(2026, 1, 10, 7, 2));
+    for (const auto& p : svc.pending()) restarted.restore_pending(p);
+    CHECK(restarted.is_snoozed(a));
+    CHECK(restarted.next_fire(a) == utc(2026, 1, 10, 7, 6));
+    const auto events = restarted.tick(utc(2026, 1, 10, 7, 2));
+    REQUIRE(events.size() == 1);  // b was ringing: rings again; a waits for its snooze
+    CHECK(events[0].alarm_id == b);
+    CHECK(events[0].kind == AlarmEvent::Kind::Ring);
+}
+
+TEST_CASE("restore_pending ignores unknown and disabled alarms") {
+    AlarmService svc(kUtc);
+    const auto t0 = utc(2026, 1, 10, 6, 0);
+    const int off = svc.upsert(Alarm{.time = {7, 0}, .enabled = false}, t0);
+    svc.restore_pending({off, utc(2026, 1, 10, 6, 30)});
+    svc.restore_pending({99, utc(2026, 1, 10, 6, 30)});
+    CHECK_FALSE(svc.next_fire(off).has_value());
+    CHECK(svc.tick(utc(2026, 1, 10, 6, 30)).empty());
+}
+
+TEST_CASE("New alarm ids are one more than the highest in use") {
+    CHECK(next_alarm_id({}) == 1);
+    CHECK(next_alarm_id({Alarm{.id = 2}, Alarm{.id = 5}}) == 6);
+
+    AlarmService svc(kUtc);
+    const auto t0 = utc(2026, 1, 10, 6, 0);
+    svc.upsert(Alarm{.id = 4, .time = {7, 0}}, t0);
+    CHECK(svc.upsert(Alarm{.time = {8, 0}}, t0) == 5);
+}
+
+TEST_CASE("schedule_changed only looks at time and repeat days") {
+    const Alarm a{.time = {7, 0}, .label = "x"};
+    Alarm b = a;
+    b.label = "y";
+    b.snooze_minutes = 3;
+    CHECK_FALSE(schedule_changed(a, b));
+    b.time = {7, 5};
+    CHECK(schedule_changed(a, b));
+    b = a;
+    b.days = DaySet::weekdays();
+    CHECK(schedule_changed(a, b));
+}

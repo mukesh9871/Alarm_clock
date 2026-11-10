@@ -5,11 +5,16 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <fstream>
+#include <sstream>
+
 using namespace ac;
 using namespace ac::test;
 using Catch::Matchers::ContainsSubstring;
 
 namespace {
+
+std::filesystem::path test_sound(const std::string& s) { return s.empty() ? "default.wav" : s; }
 
 struct Fixture {
     TempDir dir;
@@ -17,11 +22,27 @@ struct Fixture {
     FakeClock clock{utc(2026, 1, 10, 6, 0)};
     TestZone tz{minutes{0}};
     FakeAudio audio;
-    AlarmSession session{file, clock, tz, audio, [](const std::string& s) { return std::filesystem::path(s.empty() ? "default.wav" : s); }};
+    AlarmSession session{file, clock, tz, audio, test_sound};
+    // The same app started again later, on the same alarm file.
+    StateFile reopened_file{dir.path() / "alarms.json"};
+    AlarmSession reopened{reopened_file, clock, tz, audio, test_sound};
 
     void write_state(const SavedState& s) { StateFile(file.path()).save(s); }
     SavedState read_state() { return StateFile(file.path()).load().state; }
+    std::string raw_file() {
+        std::ifstream in(file.path(), std::ios::binary);
+        std::ostringstream buf;
+        buf << in.rdbuf();
+        return buf.str();
+    }
 };
+
+const Alarm* find_alarm(const std::vector<Alarm>& alarms, int id) {
+    for (const auto& a : alarms) {
+        if (a.id == id) return &a;
+    }
+    return nullptr;
+}
 
 bool has_notice(const std::vector<Notice>& ns, Notice::Level level, const std::string& text) {
     for (const auto& n : ns) {
@@ -252,4 +273,103 @@ TEST_CASE("Session reports when the OS refuses the wake timer") {
     CHECK(f.session.wake_timer_ok());  // nothing to schedule yet
     f.session.save_alarm(Alarm{.time = {7, 0}});
     CHECK_FALSE(f.session.wake_timer_ok());
+}
+
+TEST_CASE("Session keeps its alarms when a reload finds the file unreadable") {
+    Fixture f;
+    f.session.start();
+    const int id = f.session.save_alarm(Alarm{.time = {6, 30}});
+
+    // Caught mid-write by an editor, or broken by hand.
+    {
+        std::ofstream(f.file.path(), std::ios::binary | std::ios::trunc) << "{ half-written";
+    }
+    bump_mtime(f.file.path());
+    f.clock.advance(std::chrono::seconds{1});
+    CHECK(has_notice(f.session.tick(), Notice::Level::Warning, "Could not read"));
+    CHECK(f.session.service().find(id) != nullptr);
+    CHECK(f.raw_file() == "{ half-written");  // left for the user, not replaced or moved
+    CHECK_FALSE(std::filesystem::exists(f.dir.path() / "alarms.json.corrupt-1"));
+
+    // The alarm still rings.
+    f.clock.set(utc(2026, 1, 10, 6, 30));
+    CHECK(has_notice(f.session.tick(), Notice::Level::Alarm, "06:30"));
+    f.session.dismiss();
+    CHECK(f.raw_file() == "{ half-written");
+
+    // Once the file is valid again, the session follows it.
+    SavedState fixed;
+    fixed.alarms.push_back(Alarm{.id = 7, .time = {8, 0}});
+    f.write_state(fixed);
+    bump_mtime(f.file.path());
+    CHECK(has_notice(f.session.tick(), Notice::Level::Info, "reloaded"));
+    CHECK(f.session.service().find(7) != nullptr);
+    CHECK(f.session.service().find(id) == nullptr);
+}
+
+TEST_CASE("Session edits don't overwrite changes made from another process") {
+    Fixture f;
+    f.session.start();
+    const int mine = f.session.save_alarm(Alarm{.time = {6, 30}});
+
+    SavedState s = f.read_state();
+    s.alarms.push_back(Alarm{.id = 2, .time = {7, 0}, .label = "from CLI"});
+    f.write_state(s);
+    bump_mtime(f.file.path());
+
+    // The user acts in the UI before the next tick has reloaded the file.
+    f.session.toggle_alarm(mine);
+    const auto saved = f.read_state().alarms;
+    REQUIRE(saved.size() == 2);
+    CHECK_FALSE(find_alarm(saved, mine)->enabled);
+    REQUIRE(find_alarm(saved, 2) != nullptr);
+    CHECK(find_alarm(saved, 2)->label == "from CLI");
+
+    // A new UI alarm doesn't reuse the CLI's id, and the reload is reported on the next tick.
+    CHECK(f.session.save_alarm(Alarm{.time = {9, 0}}) == 3);
+    CHECK(has_notice(f.session.tick(), Notice::Level::Info, "reloaded"));
+}
+
+TEST_CASE("A snooze survives closing and reopening the app") {
+    Fixture f;
+    f.session.start();
+    f.session.save_alarm(Alarm{.time = {6, 30}, .snooze_minutes = 5});
+    f.clock.set(utc(2026, 1, 10, 6, 30));
+    f.session.tick();
+    f.session.snooze();
+    f.clock.set(utc(2026, 1, 10, 6, 31));
+    f.session.shutdown();
+    CHECK(f.read_state().pending == std::vector<PendingRing>{{1, utc(2026, 1, 10, 6, 35)}});
+
+    f.clock.set(utc(2026, 1, 10, 6, 33));
+    CHECK(f.reopened.start().empty());
+    CHECK(f.reopened.service().is_snoozed(1));
+    CHECK(f.reopened.service().next_fire(1) == utc(2026, 1, 10, 6, 35));
+
+    f.clock.set(utc(2026, 1, 10, 6, 35));
+    CHECK(has_notice(f.reopened.tick(), Notice::Level::Alarm, "06:30"));
+    f.reopened.dismiss();
+    const auto state = f.read_state();
+    CHECK_FALSE(state.alarms.at(0).enabled);  // the one-shot is done, not re-armed for tomorrow
+    CHECK(state.pending.empty());
+}
+
+TEST_CASE("An alarm ringing when the app died rings again on restart, or is reported missed") {
+    Fixture f;
+    f.session.start();
+    f.session.save_alarm(Alarm{.time = {6, 30}, .label = "Once"});
+    f.clock.set(utc(2026, 1, 10, 6, 30));
+    f.session.tick();  // ringing - and then the process is killed (no shutdown)
+    REQUIRE(f.read_state().pending.size() == 1);
+
+    SECTION("restarted within the grace period") {
+        f.clock.set(utc(2026, 1, 10, 6, 40));
+        CHECK(has_notice(f.reopened.start(), Notice::Level::Alarm, "Once"));
+    }
+    SECTION("restarted much later") {
+        f.clock.set(utc(2026, 1, 10, 9, 0));
+        CHECK(has_notice(f.reopened.start(), Notice::Level::Warning, "Missed alarm 06:30"));
+        CHECK_FALSE(f.read_state().alarms.at(0).enabled);
+        CHECK(f.read_state().pending.empty());
+    }
 }

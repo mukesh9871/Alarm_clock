@@ -119,3 +119,58 @@ TEST_CASE("run_command bedtime prints suggestions") {
     CHECK_THAT(out.str(), ContainsSubstring("If you go to bed now (23:00)"));
     CHECK_THAT(out.str(), ContainsSubstring("03:45"));  // 23:00 + 15m + 3 cycles (4h30m)
 }
+
+namespace {
+struct CliFixture {
+    TempDir dir;
+    StateFile file{dir.path() / "alarms.json"};
+    FakeClock clock{utc(2026, 1, 10, 6, 0)};
+    TestZone tz{minutes{0}};
+    std::ostringstream out, err;
+
+    int run(const std::vector<std::string>& args) {
+        out.str("");
+        err.str("");
+        return run_command(cli::parse(args).command, file, clock, tz, out, err);
+    }
+    SavedState state() { return StateFile(file.path()).load().state; }
+};
+}  // namespace
+
+TEST_CASE("run_command edit turns an alarm back on only when its schedule changes") {
+    CliFixture f;
+    REQUIRE(f.run({"add", "6:30"}) == 0);
+    REQUIRE(f.run({"disable", "1"}) == 0);
+
+    REQUIRE(f.run({"edit", "1", "--label", "Gym"}) == 0);
+    CHECK_THAT(f.out.str(), ContainsSubstring("It is off"));
+    CHECK_FALSE(f.state().alarms.at(0).enabled);
+
+    REQUIRE(f.run({"edit", "1", "--time", "7:00"}) == 0);
+    CHECK_THAT(f.out.str(), ContainsSubstring("rings in 1h 0m"));
+    CHECK(f.state().alarms.at(0).enabled);
+}
+
+TEST_CASE("run_command numbers new alarms after the highest id") {
+    CliFixture f;
+    SavedState s;
+    s.alarms.push_back(Alarm{.id = 5, .time = {7, 0}});
+    s.alarms.push_back(Alarm{.id = 2, .time = {8, 0}});
+    f.file.save(s);
+    REQUIRE(f.run({"add", "9:00"}) == 0);
+    CHECK_THAT(f.out.str(), ContainsSubstring("Added alarm 6"));
+}
+
+TEST_CASE("run_command shows a saved snooze and drops it when the alarm changes") {
+    CliFixture f;
+    SavedState s;
+    s.alarms.push_back(Alarm{.id = 1, .time = {5, 50}});
+    s.pending.push_back({1, utc(2026, 1, 10, 6, 5)});
+    f.file.save(s);
+
+    REQUIRE(f.run({"list"}) == 0);
+    CHECK_THAT(f.out.str(), ContainsSubstring("snoozed until 06:05, in 5m"));
+
+    REQUIRE(f.run({"edit", "1", "--label", "x"}) == 0);
+    CHECK(f.state().pending.empty());
+}

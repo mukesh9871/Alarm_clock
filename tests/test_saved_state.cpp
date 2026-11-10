@@ -10,6 +10,7 @@
 
 using namespace ac;
 using namespace ac::test;
+using Catch::Matchers::ContainsSubstring;
 
 namespace {
 SavedState sample() {
@@ -26,6 +27,7 @@ SavedState sample() {
                              .challenge = ChallengeKind::Math,
                              .updated_at = utc(2026, 5, 1, 12)});
     s.last_seen = utc(2026, 11, 8, 6, 0);
+    s.pending.push_back({1, utc(2026, 11, 8, 6, 54)});
     return s;
 }
 }  // namespace
@@ -61,6 +63,14 @@ TEST_CASE("state_from_json rejects malformed input with a reason") {
     CHECK_THROWS_AS(state_from_json(R"({"version":1,"alarms":[{"time":"07:00"}]})"), StateFormatError);
     CHECK_THROWS_WITH(state_from_json(R"({"version":1,"alarms":[{"id":1,"time":"07:00","challenge":"chess"}]})"),
                       ContainsSubstring("invalid challenge"));
+}
+
+TEST_CASE("state_from_json drops pending rings for alarms that no longer exist") {
+    const auto s = state_from_json(
+        R"({"version":1,"alarms":[{"id":1,"time":"07:00"}],"pending":[{"id":1,"due_unix":60},{"id":2,"due_unix":60}]})");
+    REQUIRE(s.pending.size() == 1);
+    CHECK(s.pending[0].alarm_id == 1);
+    CHECK(s.pending[0].due == TimePoint{std::chrono::seconds{60}});
 }
 
 TEST_CASE("StateFile: missing file loads empty, save then load round-trips") {
@@ -104,3 +114,56 @@ TEST_CASE("StateFile: detects external modification") {
     std::filesystem::last_write_time(file.path(), std::filesystem::file_time_type::clock::now() + std::chrono::seconds{5});
     CHECK(file.changed_on_disk());
 }
+
+TEST_CASE("StateFile: save leaves no temp files behind") {
+    TempDir dir;
+    StateFile file(dir.path() / "alarms.json");
+    file.save(sample());
+    file.save(SavedState{});
+    int entries = 0;
+    for ([[maybe_unused]] const auto& e : std::filesystem::directory_iterator(dir.path())) ++entries;
+    CHECK(entries == 1);
+}
+
+TEST_CASE("StateFile: OnCorrupt::Leave keeps an unreadable file and refuses to overwrite it") {
+    TempDir dir;
+    const auto path = dir.path() / "alarms.json";
+    {
+        std::ofstream(path) << "{ half-written";
+    }
+    StateFile file(path);
+    const auto result = file.load(StateFile::OnCorrupt::Leave);
+    CHECK(result.unreadable);
+    REQUIRE(result.warning.has_value());
+    CHECK_THAT(*result.warning, ContainsSubstring("left as is"));
+    CHECK(std::filesystem::exists(path));
+    CHECK_FALSE(std::filesystem::exists(dir.path() / "alarms.json.corrupt-1"));
+    CHECK_FALSE(file.changed_on_disk());  // no reload loop until it changes again
+    CHECK_THROWS_WITH(file.save(sample()), ContainsSubstring("not overwriting"));
+
+    // Once someone fixes the file, it loads and saves normally again.
+    StateFile(path).save(sample());
+    bump_mtime(path);
+    CHECK(file.changed_on_disk());
+    CHECK(file.load(StateFile::OnCorrupt::Leave).state == sample());
+    CHECK_NOTHROW(file.save(SavedState{}));
+}
+
+#ifdef _WIN32
+TEST_CASE("StateFile: a corrupt file that can't be moved is copied to the backup instead") {
+    TempDir dir;
+    const auto path = dir.path() / "alarms.json";
+    {
+        std::ofstream(path) << "{ this is not json";
+    }
+    // On Windows an open file can't be renamed, as when an editor or virus scanner holds it.
+    std::ifstream held(path);
+    REQUIRE(held.is_open());
+    StateFile file(path);
+    const auto result = file.load();
+    CHECK(result.unreadable);
+    REQUIRE(result.warning.has_value());
+    CHECK_THAT(*result.warning, ContainsSubstring("copied to"));
+    CHECK(std::filesystem::exists(dir.path() / "alarms.json.corrupt-1"));
+}
+#endif
