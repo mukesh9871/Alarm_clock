@@ -112,11 +112,18 @@ int run_command(const cli::Command& cmd, StateFile& file, const Clock& clock, co
             } else if constexpr (std::is_same_v<T, cli::Edit>) {
                 Alarm* a = find(c.id);
                 if (a == nullptr) return not_found(c.id);
+                const Alarm before = *a;
                 apply_options(c.options, *a);
+                if (schedule_changed(before, *a)) a->enabled = true;
                 a->updated_at = now;
                 forget_pending(c.id);
                 save();
-                out << "Updated alarm " << c.id << ".\n";
+                out << "Updated alarm " << c.id;
+                if (a->enabled) {
+                    out << " - rings in " << format_duration(next_occurrence(a->time, now, tz, a->days) - now) << ".\n";
+                } else {
+                    out << ". It is off; turn it on with: alarm_clock enable " << c.id << '\n';
+                }
                 return 0;
             } else if constexpr (std::is_same_v<T, cli::Remove>) {
                 if (find(c.id) == nullptr) return not_found(c.id);

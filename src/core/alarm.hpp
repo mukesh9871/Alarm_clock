@@ -27,6 +27,12 @@ struct Alarm {
     friend bool operator==(const Alarm&, const Alarm&) = default;
 };
 
+// True if an edit changes when the alarm rings (its time or repeat days). Such an edit
+// turns the alarm on: you don't reschedule an alarm you want to stay off.
+[[nodiscard]] inline bool schedule_changed(const Alarm& before, const Alarm& after) {
+    return before.time != after.time || before.days != after.days;
+}
+
 // An occurrence that is still outstanding: snoozed, or ringing when the app closed.
 // Saved so a restart resumes it instead of losing it.
 struct PendingRing {

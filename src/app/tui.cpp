@@ -80,7 +80,7 @@ struct EditForm {
             if (days[i]) a.days.add(ui_weekday(i));
         }
         a.challenge = math ? ChallengeKind::Math : ChallengeKind::None;
-        a.enabled = true;  // editing an alarm implies you want it on
+        if (schedule_changed(base, a)) a.enabled = true;
         return a;
     }
 
